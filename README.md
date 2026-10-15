@@ -1,3 +1,6 @@
+<<<<<<< HEAD
+# UMD08_ChatApp
+=======
 # UDM08 - Chat TCP Client–Server
 **Mã đề tài:** UDM08  
 **Môn học:** Lập trình mạng  
@@ -30,3 +33,4 @@ UDM08_ChatApp/
 ├── Extra/                  # Hình ảnh, tài nguyên, file cấu hình
 ├── PPTX/                   # Slide thuyết trình
 └── README.md               # Tài liệu hướng dẫn này
+>>>>>>> origin/main
