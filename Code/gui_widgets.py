@@ -189,7 +189,6 @@ if __name__ == "__main__":
     # KHUNG NHẬP LIỆU CHAT Ở ĐÁY CỬA SỔ
     input_container = QHBoxLayout()
     input_container.setSpacing(8)
-
     input_text = AutoResizingTextEdit(min_height=38, max_height=120)
 
     btn_send = QPushButton("Send")
