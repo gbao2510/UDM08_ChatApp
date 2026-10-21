@@ -7,9 +7,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QPixmap, QPainter, QPainterPath, QColor
 from PyQt6.QtCore import Qt, pyqtSignal
 
-# ==============================================================================
-# COMPONENT 1: AVATAR TRÒN (Giữ nguyên gốc)
-# ==============================================================================
+# COMPONENT 1: AVATAR TRÒN
 class CircularAvatar(QLabel):
     """Widget hiển thị avatar cắt tròn"""
     def __init__(self, size=36, image_path=None, parent=None):
@@ -43,9 +41,7 @@ class CircularAvatar(QLabel):
 
         self.setPixmap(rounded)
 
-# ==============================================================================
-# COMPONENT 2: BONG BÓNG CHAT (Giữ nguyên gốc)
-# ==============================================================================
+# COMPONENT 2: BONG BÓNG CHAT
 class MessageItem(QWidget):
     """Widget đại diện cho 1 bong bóng chat"""
     def __init__(self, sender_name: str, message: str, is_self: bool = False, avatar_path: str = None, parent=None):
@@ -196,7 +192,7 @@ if __name__ == "__main__":
 
     input_text = AutoResizingTextEdit(min_height=38, max_height=120)
 
-    btn_send = QPushButton("Gửi")
+    btn_send = QPushButton("Send")
     btn_send.setFixedSize(56, 38)
     btn_send.setCursor(Qt.CursorShape.PointingHandCursor)
     btn_send.setStyleSheet("""
