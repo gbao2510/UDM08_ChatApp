@@ -1,13 +1,12 @@
-
 import json
 import pytest
+import sys
+sys.path.insert(0, '') 
 
-from server_router import ServerRouter
-
+from Code.Server.server_router import ServerRouter
 
 def test_parse_normal_message():
     router = ServerRouter()
-
     raw = json.dumps({
         "sender": "Ban",
         "content": "Xin chao"

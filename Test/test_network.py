@@ -1,7 +1,9 @@
 import sys
+sys.path.insert(0, '') 
+
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import QTimer
-from network_worker import NetworkClient
+from Code.Client.network_worker import NetworkClient
 
 
 def handle_connected():
