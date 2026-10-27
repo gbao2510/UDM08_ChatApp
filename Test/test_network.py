@@ -27,7 +27,7 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
 
     # Khởi tạo client
-    client = NetworkClient(host='127.0.0.1', port=8080)
+    client = NetworkClient(host='127.0.0.1', port=5000)
 
     # Lắp tín hiệu
     client.connected_signal.connect(handle_connected)

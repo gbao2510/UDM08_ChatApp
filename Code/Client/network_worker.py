@@ -49,6 +49,9 @@ class NetworkClient(QThread):
 
                 buffer += data
                 
+                # CAMERA GIÁM SÁT: Đặt ngay cửa ngõ, trước mọi vòng lặp và hàm xử lý
+                print(f"--- BẮT TẠI TRẬN SERVER GỬI --- : {data}")
+                
                 # Tách các gói tin theo ký tự '\n'
                 while "\n" in buffer:
                     line, buffer = buffer.split("\n", 1)
