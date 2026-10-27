@@ -6,7 +6,7 @@ class NetworkClient(QThread):
     received_signal = pyqtSignal(dict)      # Nhận dl JSON từ server
     connected_signal = pyqtSignal()         # Báo kết nối thành công
     disconnected_signal = pyqtSignal()      # Báo ngắt kết nối
-    error_signal = pyqtSignal(str)          # Báo lỗi mạng
+    error_signal = pyqtSignal(str)          # Báo lỗi
 
     def __init__(self, host='127.0.0.1', port=8888, parent=None):
         super().__init__(parent)
@@ -14,7 +14,7 @@ class NetworkClient(QThread):
         self.port = port
         self.client_socket = None
         self.is_running = False
-        self._send_mutex = QMutex() # Đảm bảo thread-safe khi gửi dữ liệu
+        self._send_mutex = QMutex() # Thread-safe khi gửi dữ liệu
 
     def connect_to_server(self, host=None, port=None) -> bool:
         """Khởi tạo kết nối TCP Socket tới Server"""
@@ -49,15 +49,18 @@ class NetworkClient(QThread):
 
                 buffer += data
                 
-                # Tách các gói tin theo ký tự '\n'
                 while "\n" in buffer:
                     line, buffer = buffer.split("\n", 1)
-                    if line.strip():
-                        json_data = json.loads(line)
-                        self.received_signal.emit(json_data)
-
-            except json.JSONDecodeError:
-                self.error_signal.emit("Lỗi định dạng JSON nhận được không hợp lệ.")
+                    line = line.strip()
+                    if line:
+                        try:
+                            json_data = json.loads(line)
+                            if isinstance(json_data, dict):
+                                self.received_signal.emit(json_data)
+                        except json.JSONDecodeError:
+                            # Bỏ qua các chuỗi plain-text chào mừng từ server mà không báo lỗi hỏng UI
+                            pass
+                                        
             except Exception as e:
                 if self.is_running:
                     self.error_signal.emit(f"Lỗi khi nhận dữ liệu: {str(e)}")
