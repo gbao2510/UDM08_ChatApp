@@ -1,98 +1,153 @@
-import socket  # Thư viện mạng chuẩn của Python để làm việc với TCP Socket
-import threading  # Thư viện hỗ trợ đa luồng để phục vụ nhiều Client đồng thời
-import logging  # Thư viện chuẩn dùng để ghi lại lịch sử sự kiện (log)
-from datetime import datetime  # Thư viện lấy ngày giờ hiện tại hệ thống
-import sys  # Thư viện hệ thống để cấu hình bảng mã console UTF-8
+import socket  # Thư viện socket mạng TCP chuẩn của Python
+import threading  # Thư viện đa luồng để phục vụ nhiều Client đồng thời
+import json  # Thư viện làm việc với định dạng dữ liệu JSON
+import logging  # Thư viện ghi log lịch sử hoạt động của hệ thống
+import sys  # Thư viện hệ thống để chỉnh bảng mã UTF-8 cho Console
+import os  # Thư viện thao tác với đường dẫn thư mục hệ thống
 
-# Đảm bảo hiển thị tiếng Việt có dấu mượt mà trên console Windows mà không bị lỗi font/crash
+# Đảm bảo hiển thị tiếng Việt có dấu rõ ràng trên Console Windows
 if sys.stdout.encoding != 'utf-8':
     try:
-        sys.stdout.reconfigure(encoding='utf-8')
-        sys.stderr.reconfigure(encoding='utf-8')
+        sys.stdout.reconfigure(encoding='utf-8')  # Cấu hình chuẩn đầu ra UTF-8
+        sys.stderr.reconfigure(encoding='utf-8')  # Cấu hình chuẩn báo lỗi UTF-8
     except Exception:
         pass
 
 
 class ServerCore:
     def __init__(self, host="0.0.0.0", port=5000):
-        self.host = host  # Địa chỉ IP mà Server lắng nghe (0.0.0.0 nghĩa là chấp nhận mọi card mạng)
-        self.port = port  # Cổng mạng (Port) để Client kết nối tới
-        self.server_socket = None  # Biến lưu trữ đối tượng Socket chính của Server
-        self.is_running = False  # Cờ (Flag) kiểm soát trạng thái chạy/dừng của Server
-        self.clients = []  # Danh sách tạm lưu trữ các socket của Client đang kết nối
+        # Địa chỉ IP của Server (0.0.0.0 chấp nhận kết nối từ mọi card mạng)
+        self.host = host
+        # Cổng mạng Port mà Server lắng nghe kết nối
+        self.port = port
+        # Biến lưu trữ socket chính của Server
+        self.server_socket = None
+        # Cờ đánh dấu Server đang chạy hay đã dừng
+        self.is_running = False
 
-        self.setup_logger()  # Gọi hàm cấu hình hệ thống ghi log ngay khi khởi tạo
+        # --- YÊU CẦU TUẦN 2: QUẢN LÝ DANH SÁCH CLIENT ONLINE ---
+        # Dictionary lưu trữ các client đang kết nối: {client_socket: username}
+        self.clients = {}
+        # Khóa Lock để tránh xung đột dữ liệu khi nhiều luồng cùng thao tác trên dictionary clients
+        self.lock = threading.Lock()
+
+        # Thiết lập cấu hình hệ thống ghi log
+        self.setup_logger()
 
     def setup_logger(self):
-        """Thiết lập ghi log ra cả màn hình Console và lưu vào file server.log"""
-        # Định dạng dòng log: [Thời gian] [Cấp độ LOG] [Tên luồng] Nội dung thông điệp
+        """Cấu hình ghi log ra cả màn hình Console và lưu vào file server.log"""
+        # Định dạng dòng log: Thời gian - Cấp độ log - Tên luồng - Nội dung log
         log_format = "%(asctime)s - [%(levelname)s] - (%(threadName)s) - %(message)s"
-
-        # Cấu hình logging cơ bản
+        # Cài đặt cấu hình logging
         logging.basicConfig(
-            level=logging.INFO,  # Ghi nhận các log từ mức INFO trở lên (INFO, WARNING, ERROR)
-            format=log_format,  # Áp dụng định dạng dòng log đã định nghĩa ở trên
+            level=logging.INFO,  # Ghi nhận các log từ mức INFO trở lên
+            format=log_format,  # Áp dụng mẫu định dạng đã tạo
             handlers=[
-                logging.FileHandler("server.log", encoding="utf-8"),  # Ghi log ra file server.log (hỗ trợ tiếng Việt)
-                logging.StreamHandler(sys.stdout)  # Đồng thời in trực tiếp dòng log ra màn hình Console (chuẩn UTF-8)
+                logging.FileHandler("server.log", encoding="utf-8"),  # Lưu vào file server.log (chuẩn UTF-8)
+                logging.StreamHandler(sys.stdout)  # Đồng thời in ra màn hình Console
             ]
         )
-        self.logger = logging.getLogger("ServerCore")  # Lấy đối tượng logger để sử dụng trong toàn class
+        # Lấy đối tượng logger để sử dụng trong toàn class
+        self.logger = logging.getLogger("ServerCore")
+
+    def get_online_users(self):
+        """Lấy danh sách tên (username) của các Client đang online hiện tại"""
+        # Sử dụng khóa lock để đảm bảo việc đọc danh sách an toàn trong môi trường đa luồng
+        with self.lock:
+            # Lấy tất cả giá trị (username) trong dictionary clients và chuyển thành dạng list
+            return list(self.clients.values())
+
+    def send_packet(self, client_socket, packet_dict):
+        """Hàm gửi 1 gói tin JSON (kèm ký tự '\\n' ở cuối) tới 1 Client cụ thể"""
+        try:
+            # Chuyển Dictionary thành chuỗi JSON (giữ nguyên tiếng Việt có dấu)
+            json_str = json.dumps(packet_dict, ensure_ascii=False)
+            # Thêm ký tự '\\n' ở cuối gói tin để chống dính gói tin TCP
+            data_to_send = (json_str + "\n").encode('utf-8')
+            # Gửi dữ liệu qua socket
+            client_socket.sendall(data_to_send)
+            return True
+        except Exception as e:
+            # Ghi log nếu xảy ra lỗi khi gửi
+            self.logger.error(f"Lỗi khi gửi dữ liệu tới Client: {e}")
+            return False
+
+    def broadcast_online_list(self, exclude_socket=None):
+        """
+        Gửi broadcast danh sách online mới nhất tới các Client khác.
+        exclude_socket: socket của Client vừa vào (được bỏ qua để không gửi lặp cho người này).
+        """
+        # Lấy danh sách tên tất cả người dùng đang online tại thời điểm hiện tại
+        online_users = self.get_online_users()
+
+        # Đóng gói thông tin danh sách online theo định dạng chuẩn JSON
+        packet = {
+            "type": "user_list",  # Loại gói tin là danh sách người dùng
+            "action": "update",  # Hành động: cập nhật danh sách
+            "online_users": online_users  # Danh sách mảng các username đang online
+        }
+
+        # Ghi log server việc thực hiện broadcast danh sách online
+        self.logger.info(f"[BROADCAST] Gửi danh sách online {online_users} tới các client khác...")
+
+        # Dùng khóa lock để sao chép danh sách các socket cần gửi nhằm tránh lỗi luồng
+        with self.lock:
+            target_clients = list(self.clients.keys())
+
+        # Duyệt qua từng client đang kết nối với Server
+        for sock in target_clients:
+            # Nếu socket này chính là client vừa vào (exclude_socket) thì bỏ qua
+            if sock == exclude_socket:
+                continue
+            # Gửi gói tin cập nhật danh sách online cho các client khác
+            self.send_packet(sock, packet)
 
     def start(self):
         """Khởi động TCP Socket Server và bắt đầu lắng nghe kết nối"""
         try:
-            # Tạo TCP Socket: AF_INET (IPv4), SOCK_STREAM (giao thức TCP tin cậy)
+            # Khởi tạo TCP socket với IPv4 (AF_INET) và giao thức TCP (SOCK_STREAM)
             self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-            # Cho phép tái sử dụng lại địa chỉ IP/Port ngay lập tức khi restart server (tránh lỗi Address already in use)
+            # Cho phép sử dụng lại địa chỉ IP/Port ngay lập tức khi restart server
             self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
-            # Gán Socket với địa chỉ IP và Port đã chỉ định
+            # Gán IP và Port cho socket chính của Server
             self.server_socket.bind((self.host, self.port))
-
-            # Đưa Socket vào trạng thái lắng nghe kết nối từ Client (cho phép hàng đợi tối đa 10 kết nối chờ)
+            # Đưa Server vào trạng thái lắng nghe (hàng đợi tối đa 10 kết nối chờ)
             self.server_socket.listen(10)
 
-            self.is_running = True  # Đánh dấu Server bắt đầu hoạt động
+            # Đánh dấu cờ Server đang hoạt động
+            self.is_running = True
             self.logger.info(f"Server đã khởi động thành công trên cổng {self.port} (IP: {self.host})")
 
-            # Bắt đầu vòng lặp đón nhận các Client kết nối tới
+            # Bắt đầu vòng lặp đón nhận kết nối từ các Client
             self.accept_clients()
 
         except Exception as e:
-            # Bắt và ghi lại lỗi nếu không thể mở cổng hoặc bị lỗi mạng nghiêm trọng
+            # Ghi nhận log nếu Server khởi động thất bại
             self.logger.error(f"Lỗi khởi động Server: {e}")
         finally:
-            # Đảm bảo đóng socket và dọn dẹp tài nguyên khi dừng server
+            # Đảm bảo giải phóng tài nguyên khi dừng Server
             self.stop()
 
     def accept_clients(self):
-        """Vòng lặp chấp nhận kết nối từ các Client mới"""
+        """Vòng lặp đón nhận từng Client mới kết nối tới Server"""
         self.logger.info("Đang chờ Client kết nối tới...")
 
+        # Vòng lặp liên tục chừng nào Server còn đang chạy
         while self.is_running:
             try:
-                # Hàm accept() sẽ tạm dừng chờ cho đến khi có một Client kết nối tới
+                # Hàm accept() tạm dừng chờ cho đến khi có một Client kết nối tới
                 client_socket, client_address = self.server_socket.accept()
-
-                # Ghi log khi có Client mới kết nối thành công kèm IP và Port của Client đó
+                # Ghi log khi có Client mới kết nối thành công kèm IP và Port
                 self.logger.info(f"Client mới kết nối thành công từ địa chỉ: {client_address}")
 
-                # Thêm socket của Client vào danh sách quản lý
-                self.clients.append(client_socket)
-
                 # Tạo một luồng (Thread) riêng biệt để xử lý dữ liệu cho Client này
-                # target: hàm sẽ chạy ngầm, args: tham số truyền vào hàm đó
                 client_thread = threading.Thread(
                     target=self.handle_client,
                     args=(client_socket, client_address),
                     name=f"Thread-{client_address[1]}"  # Đặt tên luồng theo số Port để dễ theo dõi log
                 )
-
-                # Đặt luồng ở chế độ daemon để khi tắt Server thì các luồng con tự tắt theo
+                # Đặt luồng daemon để khi Server tắt thì các luồng con tự động tắt theo
                 client_thread.daemon = True
-
                 # Bắt đầu kích hoạt luồng xử lý riêng cho Client
                 client_thread.start()
 
@@ -103,76 +158,141 @@ class ServerCore:
                 break
 
     def handle_client(self, client_socket, client_address):
-        """Hàm chạy trên luồng riêng để lắng nghe dữ liệu từ 1 Client cụ thể (Tuần 1: Mock echo)"""
-        try:
-            # Gửi lời chào mừng ban đầu tới Client (dạng bytes UTF-8)
-            welcome_msg = "Chao mung ban den voi UDM08 Chat Server!\n"
-            client_socket.sendall(welcome_msg.encode('utf-8'))
+        """Hàm chạy trên luồng riêng để xử lý giao tiếp với 1 Client cụ thể"""
+        # Biến lưu tên người dùng của client này (mặc định ban đầu là None)
+        current_username = None
+        # Bộ đệm string để tích lũy dữ liệu nhận được và cắt theo dấu xuống dòng '\\n'
+        buffer = ""
 
+        try:
+            # Vòng lặp liên tục lắng nghe dữ liệu từ Client khi Server đang chạy
             while self.is_running:
-                # Nhận tối đa 1024 bytes dữ liệu từ Client
+                # Nhận tối đa 1024 bytes dữ liệu từ socket
                 data = client_socket.recv(1024)
 
-                # Nếu data rỗng (b''), nghĩa là Client đã chủ động ngắt kết nối
+                # Nếu dữ liệu rỗng (b''), Client đã chủ động ngắt kết nối
                 if not data:
-                    self.logger.info(f"Client {client_address} đã chủ động đóng kết nối.")
+                    self.logger.info(f"Client {client_address} ({current_username}) đã ngắt kết nối.")
                     break
 
-                # Giải mã dữ liệu từ byte sang chuỗi ký tự UTF-8
-                text_received = data.decode('utf-8').strip()
-                self.logger.info(f"Nhận từ {client_address}: {text_received}")
+                # Giải mã dữ liệu byte nhận được thành chuỗi UTF-8 và nối vào bộ đệm
+                buffer += data.decode('utf-8')
 
-                # Phản hồi lại tin nhắn cho Client (Echo mock data tuần 1)
-                reply_msg = f"[Server Echo]: {text_received}\n"
-                client_socket.sendall(reply_msg.encode('utf-8'))
+                # Tách và xử lý từng gói tin phân cách bởi ký tự '\\n' (chống dính gói tin TCP)
+                while "\n" in buffer:
+                    # Tách lấy 1 gói tin đầu tiên, phần còn lại giữ lại trong buffer
+                    packet_str, buffer = buffer.split("\n", 1)
+                    # Xóa khoảng trắng thừa ở 2 đầu chuỗi
+                    packet_str = packet_str.strip()
+
+                    # Nếu gói tin rỗng thì bỏ qua
+                    if not packet_str:
+                        continue
+
+                    # Thử phân tích chuỗi vừa nhận thành Dictionary JSON
+                    try:
+                        message_dict = json.loads(packet_str)
+                    except json.JSONDecodeError:
+                        # Ghi cảnh báo nếu dữ liệu nhận được không đúng định dạng JSON
+                        self.logger.warning(f"Nhận chuỗi không phải JSON từ {client_address}: {packet_str}")
+                        continue
+
+                    # Lấy loại gói tin (type)
+                    msg_type = message_dict.get("type")
+
+                    # --- YÊU CẦU TUẦN 2: XỬ LÝ KHI CLIENT A VÀO VÀ ĐỒNG BỘ DANH SÁCH ONLINE ---
+                    if msg_type == "login":
+                        # Lấy username do client gửi lên (nếu không có thì đặt tên tạm theo Port)
+                        current_username = message_dict.get("username", f"User_{client_address[1]}")
+
+                        # Khóa lock để lưu Client và username vào danh sách quản lý
+                        with self.lock:
+                            self.clients[client_socket] = current_username
+
+                        # Ghi log sự kiện Client A đăng nhập thành công
+                        self.logger.info(f"==> Client A [{current_username}] đã vào hệ thống.")
+
+                        # 1. Gửi gói 'login_ack' xác nhận cho CHÍNH Client A (kèm danh sách online hiện tại)
+                        login_ack_packet = {
+                            "type": "login_ack",
+                            "status": "success",
+                            "username": current_username,
+                            "online_users": self.get_online_users()
+                        }
+                        self.send_packet(client_socket, login_ack_packet)
+                        self.logger.info(f"Đã gửi login_ack cho [{current_username}].")
+
+                        # 2. Gửi broadcast danh sách online mới nhất cho CÁC CLIENT KHÁC
+                        self.broadcast_online_list(exclude_socket=client_socket)
+
+                    # Xử lý các loại gói tin khác (ví dụ tin nhắn thường, ping,...)
+                    else:
+                        self.logger.info(f"Nhận tin nhắn loại '{msg_type}' từ [{current_username}]: {message_dict}")
 
         except ConnectionResetError:
-            # Xử lý trường hợp Client bị tắt đột ngột (tắt máy, crash, rút dây mạng)
-            self.logger.warning(f"Client {client_address} bị ngắt kết nối đột ngột (Connection Reset)!")
+            # Xử lý khi Client bị tắt đột ngột (rút dây mạng, tắt cửa sổ ngang)
+            self.logger.warning(f"Client {client_address} ({current_username}) bị ngắt kết nối đột ngột!")
         except Exception as e:
-            # Ghi nhận các lỗi ngoại lệ khác trong quá trình truyền dữ liệu
-            self.logger.error(f"Lỗi xử lý Client {client_address}: {e}")
+            # Ghi nhận các lỗi ngoại lệ khác
+            self.logger.error(f"Lỗi xử lý Client {client_address} ({current_username}): {e}")
         finally:
-            # Khối finally luôn luôn chạy để dọn dẹp tài nguyên mạng
-            if client_socket in self.clients:
-                self.clients.remove(client_socket)  # Xóa socket khỏi danh sách quản lý
-            client_socket.close()  # Đóng kết nối socket của client này
-            self.logger.info(f"Đã giải phóng tài nguyên socket của Client {client_address}.")
+            # KHỐI DỌN DẸP KHI CLIENT THOÁT:
+            with self.lock:
+                # Xóa client khỏi danh sách quản lý online
+                if client_socket in self.clients:
+                    del self.clients[client_socket]
+
+            # Đóng kết nối socket của client này
+            try:
+                client_socket.close()
+            except Exception:
+                pass
+
+            self.logger.info(f"Đã giải phóng tài nguyên của [{current_username}] ({client_address}).")
+
+            # Nếu client đã đăng nhập rời đi, broadcast lại danh sách online mới cho các client còn lại
+            if current_username:
+                self.broadcast_online_list()
 
     def stop(self):
-        """Dừng Server và giải phóng toàn bộ tài nguyên Socket"""
-        self.is_running = False  # Tắt cờ trạng thái để các vòng lặp dừng lại
+        """Dừng Server và giải phóng toàn bộ tài nguyên socket"""
+        # Đánh dấu cờ dừng server
+        self.is_running = False
 
-        # Đóng toàn bộ các socket client đang kết nối
-        for client in self.clients:
-            try:
-                client.close()
-            except:
-                pass
-        self.clients.clear()  # Làm rỗng danh sách client
+        # Khóa lock để đóng toàn bộ socket của các client đang online
+        with self.lock:
+            for sock in self.clients.keys():
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+            # Xóa rỗng danh sách client
+            self.clients.clear()
 
         # Đóng socket chính của Server
         if self.server_socket:
             try:
                 self.server_socket.close()
-                self.logger.info("Đã đóng Socket Server.")
+                self.logger.info("Đã đóng Socket Server chính.")
             except Exception as e:
-                self.logger.error(f"Lỗi khi đóng Socket Server: {e}")
+                self.logger.error(f"Lỗi khi đóng Socket Server chính: {e}")
 
 
 # Điểm chạy chương trình khi file này được thực thi trực tiếp
 if __name__ == "__main__":
-    PORT = 5000  # Cổng mạng quy định
+    PORT = 5000  # Cổng mạng quy định cho Server
     HOST = "127.0.0.1"  # Chạy thử nghiệm trên máy local (localhost)
 
     # Khởi tạo đối tượng ServerCore
     server = ServerCore(host=HOST, port=PORT)
 
-    print("=== UDM_08 TCP SERVER CORE (TUẦN 1) ===")
+    print("=== UDM_08 TCP SERVER CORE (TUẦN 2 - ĐỒNG BỘ DANH SÁCH ONLINE) ===")
     print("Server đang chạy. Nhấn Ctrl + C để dừng Server.\n")
 
     try:
-        server.start()  # Bắt đầu chạy server
+        # Bắt đầu chạy server
+        server.start()
     except KeyboardInterrupt:
+        # Xử lý khi người dùng nhấn tổ hợp Ctrl + C để dừng an toàn
         print("\nĐang tắt Server an toàn...")
         server.stop()
