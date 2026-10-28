@@ -1,17 +1,27 @@
+
 import json
 import pytest
-
 from Code.Server.server_router import ServerRouter
+
 
 def test_parse_normal_message():
     router = ServerRouter()
 
-    raw = json.dumps({
-        "sender": "Ban",
-        "content": "Xin chao"
-    })
+    result = router.feed_data(
+        b'{"type":"chat","content":"Hello"}\n'
+    )
 
-    result = router.parse_message(raw)
+    assert len(result) == 1
+    assert result[0]["ok"] is True
+    assert result[0]["message"]["content"] == "Hello"
+    assert result[0]["message"]["msg_id"] == 1
+
+
+def test_tcp_packet_split():
+    router = ServerRouter()
+
+    first = router.feed_data(b'{"content":"Hel')
+    second = router.feed_data(b'lo"}\n')
 
     assert first == []
     assert len(second) == 1
