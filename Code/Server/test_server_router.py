@@ -1,7 +1,7 @@
 
-import json
-
-from server_router import ServerRouter
+   import json
+   import pytest
+   from Code.Server.server_router import ServerRouter
 
 
 def test_parse_normal_message():
@@ -99,3 +99,4 @@ def test_error_response_is_valid_json():
     assert decoded["type"] == "error"
     assert decoded["error"]["code"] == "INVALID_JSON"
     assert encoded.endswith(b"\n")
+
