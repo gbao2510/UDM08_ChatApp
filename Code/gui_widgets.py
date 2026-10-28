@@ -5,9 +5,10 @@ from PyQt6.QtWidgets import (
     QTextEdit, QPushButton
 )
 from PyQt6.QtGui import QPixmap, QPainter, QPainterPath, QColor
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QObject
 
-# COMPONENT 1: AVATAR TRÒN
+# COMPONENT 1: AVATAR TRÒN 
+
 class CircularAvatar(QLabel):
     """Widget hiển thị avatar cắt tròn"""
     def __init__(self, size=36, image_path=None, parent=None):
@@ -41,7 +42,8 @@ class CircularAvatar(QLabel):
 
         self.setPixmap(rounded)
 
-# COMPONENT 2: BONG BÓNG CHAT
+#COMPONENT 2: BONG BÓNG CHAT 
+
 class MessageItem(QWidget):
     """Widget đại diện cho 1 bong bóng chat"""
     def __init__(self, sender_name: str, message: str, is_self: bool = False, avatar_path: str = None, parent=None):
@@ -99,7 +101,8 @@ class MessageItem(QWidget):
             main_layout.addLayout(content_vbox)
             main_layout.addSpacerItem(QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
 
-# Update : Ô NHẬP TIN NHẮN TỰ CO GIÃN CHIỀU CAO
+# COMPONENT 3: Ô NHẬP TIN NHẮN TỰ CO GIÃN
+
 class AutoResizingTextEdit(QTextEdit):
     """
     Ô nhập văn bản tự động xuống dòng và co giãn chiều cao theo nội dung:
@@ -147,7 +150,13 @@ class AutoResizingTextEdit(QTextEdit):
         else:
             super().keyPressEvent(event)
 
-# KHỐI TEST ĐỘC LẬP VỚI MOCK DATA VÀ KHUNG NHẬP LIỆU TƯƠNG TÁC
+# SIGNAL BRIDGE
+class MessageSignalBridge(QObject):
+    """Signal phát dictionary gói tin JSON nhận được từ Server/NetworkClient"""
+    message_received = pyqtSignal(dict)
+
+# KHỐI TEST CHẠY THỬ ĐỘC LẬP
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 
@@ -167,26 +176,42 @@ if __name__ == "__main__":
     chat_list_layout = QVBoxLayout(scroll_content)
     chat_list_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-    # Dữ liệu giả lập ban đầu
+    # HÀM TỰ ADD MESSAGEITEM KHI NHẬN DICT TỪ SIGNAL
+    def add_message_item(data: dict):
+        """
+        Nhận gói tin JSON chuẩn (từ Signal của Trâm hoặc Mock data),
+        tự động bóc tách dữ liệu và thêm MessageItem vào ScrollArea.
+        """
+        sender = data.get("sender", "Ẩn danh")
+        text = data.get("content") or data.get("text") or data.get("message") or ""
+        
+        #Tự động xác định tin của bản thân
+        is_self = (sender == "Tôi") or data.get("is_self", False)
+
+        item = MessageItem(sender_name=sender, message=text, is_self=is_self)
+        chat_list_layout.addWidget(item)
+        QApplication.processEvents()
+        scroll.verticalScrollBar().setValue(scroll.verticalScrollBar().maximum())
+
+    # Khởi tạo Signal và nối sự kiện với hàm add_message_item
+    msg_bridge = MessageSignalBridge()
+    msg_bridge.message_received.connect(add_message_item)
+
+    # Bơm Mock data chuẩn theo đúng cấu trúc gói tin của Bân
     mock_messages = [
-        {"sender": "Ngô Gia Bảo", "text": "Tiến độ hoàn thành như nào rồi.", "is_self": False},
-        {"sender": "Tôi", "text": "T đang hoàn thiện component MessageItem hiển thị độc lập.", "is_self": True},
-        {"sender": "Lý Huỳnh Bích Trâm", "text": "Socket client tuần này gửi nhận chuỗi JSON cơ bản được rồi.", "is_self": False},
-        {"sender": "Tôi", "text": "Thử nghiệm tin nhắn dài tự động xuống dòng và co giãn chiều cao xem bong bóng chat có hoạt động chuẩn không.", "is_self": True},
+        {"type": "chat", "sender": "Ngô Gia Bảo", "content": "Tiến độ hoàn thành như nào rồi."},
+        {"type": "chat", "sender": "Tôi", "content": "T đang hoàn thiện component MessageItem hiển thị độc lập."},
+        {"type": "chat", "sender": "Lý Huỳnh Bích Trâm", "content": "Socket client tuần này gửi nhận chuỗi JSON cơ bản được rồi."},
+        {"type": "chat", "sender": "Tôi", "content": "Thử nghiệm tin nhắn dài tự động xuống dòng và co giãn chiều cao xem bong bóng chat có hoạt động chuẩn không."},
     ]
 
     for data in mock_messages:
-        item = MessageItem(
-            sender_name=data["sender"], 
-            message=data["text"], 
-            is_self=data["is_self"]
-        )
-        chat_list_layout.addWidget(item)
+        msg_bridge.message_received.emit(data)
 
     scroll.setWidget(scroll_content)
     outer_layout.addWidget(scroll)
 
-    # KHUNG NHẬP LIỆU CHAT Ở ĐÁY CỬA SỔ
+    # Khung nhập liệu ở đáy
     input_container = QHBoxLayout()
     input_container.setSpacing(8)
     input_text = AutoResizingTextEdit(min_height=38, max_height=120)
@@ -214,16 +239,19 @@ if __name__ == "__main__":
         text = input_text.toPlainText().strip()
         if not text:
             return
-        # Tạo bong bóng chat mới cho bản thân
-        new_item = MessageItem(sender_name="Tôi", message=text, is_self=True)
-        chat_list_layout.addWidget(new_item)
+        
+        #Đóng gói đúng format JSON: type, sender, content
+        packet = {
+            "type": "chat",
+            "sender": "Tôi",
+            "content": text
+        }
+        
+        # Phát Signal add_message_item tự động bắt và add vào ScrollArea
+        msg_bridge.message_received.emit(packet)
         input_text.clear()
         input_text.setFixedHeight(input_text.min_height)
-        # Cuộn thanh cuộn xuống tin nhắn mới nhất
-        QApplication.processEvents()
-        scroll.verticalScrollBar().setValue(scroll.verticalScrollBar().maximum())
 
-    # Bấm nút hoặc nhấn phím Enter để gửi
     btn_send.clicked.connect(send_message)
     input_text.send_requested.connect(send_message)
 
