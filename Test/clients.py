@@ -260,7 +260,7 @@ def run_stress_test(num_users, host=DEFAULT_HOST, port=DEFAULT_PORT, server_pid=
     print(f"                -> RAM Peak: {resource_summary['sys_ram_peak']}%")
     if resource_summary['server_ram_peak_mb'] is not None:
         print(f"                -> RAM Server Process: ~{resource_summary['server_ram_peak_mb']} MB (CPU Peak: {resource_summary['server_cpu_peak']}%)")
-    print(f"[+] SAU TEST    -> CPU: {cpu_after_percent}% | RAM Hệ thống: {ram_after_percent}% ({round(ram_after_mb, 1)} MB)")
+    print(f"[+] SAU TEST    -> CPU: {cpu_after_percent}% | RAM Hệ thống: {ram_after_percent}% ({round(ram_before_mb, 1)} MB)")
     print(f"[-] KẾT QUẢ MẠNG:")
     print(f"    - Thành công: {success_count}/{num_users} ({round(success_count / num_users * 100, 1)}%)")
     print(f"    - Thất bại:   {fail_count}/{num_users}")

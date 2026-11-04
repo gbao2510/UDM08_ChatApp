@@ -1,6 +1,3 @@
-<<<<<<< Updated upstream
-# UMD08_ChatApp
-=======
 # UDM08 - Chat TCP Client–Server
 **Mã đề tài:** UDM08  
 **Môn học:** Lập trình mạng  
@@ -37,4 +34,3 @@ UDM08_ChatApp/
 ├── PPTX/                   # Slide thuyết trình
 └── README.md               # Tài liệu hướng dẫn này
 ```
->>>>>>> Stashed changes
