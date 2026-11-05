@@ -1,19 +1,19 @@
 ========================================================================
      BÁO CÁO KẾT QUẢ KIỂM THỬ TẢI (STRESS TEST REPORT) - UDM08
-     Thời gian thực hiện: 2026-11-04 19:21:28
+     Thời gian thực hiện: 2026-11-05 15:03:00
 ========================================================================
 
 Chỉ số kiểm thử                     | Mức 1: 10 Users  | Mức 2: 50 Users 
 --------------------------------------------------------------------------
 Tỷ lệ kết nối thành công            | 100.0%           | 100.0%          
-Tổng thời gian thực thi (giây)      | 1.54 s           | 3.05 s          
-Độ trễ trung bình (RTT ms)          | 16.61 ms         | 462.26 ms       
-CPU Hệ thống trước test (%)         | 26.3%            | 50.5%           
-CPU Đỉnh trong test (Peak %)        | 68.8%            | 61.6%           
-CPU Trung bình trong test (%)       | 41.54%           | 32.25%          
-RAM Hệ thống trước test (%)         | 90.9%            | 90.4%           
-RAM Đỉnh trong test (Peak %)        | 91.0%            | 90.6%           
-RAM Hệ thống sau test (%)           | 90.9%            | 90.6%           
+Tổng thời gian thực thi (giây)      | 1.58 s           | 2.61 s          
+Độ trễ trung bình (RTT ms)          | 28.06 ms         | 466.56 ms       
+CPU Hệ thống trước test (%)         | 31.9%            | 26.8%           
+CPU Đỉnh trong test (Peak %)        | 81.0%            | 85.7%           
+CPU Trung bình trong test (%)       | 44.05%           | 47.32%          
+RAM Hệ thống trước test (%)         | 89.6%            | 89.9%           
+RAM Đỉnh trong test (Peak %)        | 90.1%            | 90.1%           
+RAM Hệ thống sau test (%)           | 90.0%            | 90.1%           
 
 ========================================================================
 Nhận xét sơ bộ:
