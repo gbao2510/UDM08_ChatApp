@@ -1,5 +1,6 @@
 import socket
 import json
+import datetime
 from PyQt6.QtCore import QThread, pyqtSignal, QMutex, QMutexLocker
 
 class NetworkClient(QThread):
@@ -15,6 +16,7 @@ class NetworkClient(QThread):
         self.client_socket = None
         self.is_running = False
         self._send_mutex = QMutex() # Thread-safe khi gửi dữ liệu
+        self.username = None
 
     def connect_to_server(self, host=None, port=None) -> bool:
         """Khởi tạo kết nối TCP Socket tới Server"""
@@ -78,16 +80,56 @@ class NetworkClient(QThread):
                 pass
         self.disconnected_signal.emit()
 
-    def send_data(self, payload: dict):
+    def send_data(self, payload: dict) -> bool:
         """Hàm gửi dữ liệu dạng dict/JSON tới Server"""
+        # Tự động lưu username nếu đây là gói đăng nhập
+        if isinstance(payload, dict) and payload.get("type") == "login":
+            if "username" in payload:
+                self.username = payload["username"]
+
         if self.client_socket and self.is_running:
             # Khóa mutex để tránh xung đột khi gửi dữ liệu từ nhiều sự kiện UI
             locker = QMutexLocker(self._send_mutex)
             try:
-                json_str = json.dumps(payload) + "\n"
+                json_str = json.dumps(payload, ensure_ascii=False) + "\n"
                 self.client_socket.sendall(json_str.encode('utf-8'))
+                return True
             except Exception as e:
                 self.error_signal.emit(f"Gửi dữ liệu thất bại: {str(e)}")
+                return False
+        return False
+
+    def send_message(self, content: str, receiver: str = "all", sender: str = None) -> bool:
+        """Hàm gửi tin nhắn văn bản thông thường tới Server"""
+        if not content:
+            return False
+
+        sender_name = sender or self.username or ""
+        payload = {
+            "type": "msg",
+            "sender": sender_name,
+            "receiver": receiver,
+            "content": str(content),
+            "timestamp": datetime.datetime.now().strftime("%H:%M:%S")
+        }
+        return self.send_data(payload)
+
+    def send_emoji(self, emoji: str, receiver: str = "all", sender: str = None) -> bool:
+        """Hàm gửi biểu tượng cảm xúc (Emoji) tới Server"""
+        if not emoji:
+            return False
+
+        sender_name = sender or self.username or ""
+        emoji_str = str(emoji)
+        payload = {
+            "type": "emoji",
+            "sender": sender_name,
+            "receiver": receiver,
+            "emoji": emoji_str,
+            "content": emoji_str,
+            "timestamp": datetime.datetime.now().strftime("%H:%M:%S")
+        }
+        return self.send_data(payload)
 
     def stop(self):
         """Dừng luồng an toàn khi tắt ứng dụng"""
