@@ -444,7 +444,16 @@ class ServerCore:
             ))
             return current_username
  
-        # Tin nhắn thường, ping,... (xử lý chi tiết ở các tuần sau)
+        # Tin nhắn thường, broadcast sang các client khác
+        if msg_type in ("msg", "message"):
+            with self.lock:
+                targets = [s for s in self.clients if s != client_socket]
+            for sock in targets:
+                self.send_packet(sock, message)
+            self.logger.info(f"Broadcast msg từ [{current_username}] tới {len(targets)} client")
+            return current_username
+
+        # Tin nhắn thường khác, ping,... (xử lý chi tiết ở các tuần sau)
         self.logger.info(
             f"Nhận tin nhắn loại '{msg_type}' (msg_id={message['msg_id']}) "
             f"từ [{current_username}]: {message}"
@@ -500,8 +509,16 @@ class ServerCore:
  
             self.logger.info(f"Đã giải phóng tài nguyên của [{current_username}] ({client_address}).")
  
-            # Client đã đăng nhập rời đi: báo lại danh sách online cho những người còn lại
+            # Client đã đăng nhập rời đi: gửi user_leave và cập nhật lại danh sách online cho những người còn lại
             if current_username:
+                leave_packet = {
+                    "type": "user_leave",
+                    "username": current_username
+                }
+                with self.lock:
+                    remaining_sockets = list(self.clients.keys())
+                for sock in remaining_sockets:
+                    self.send_packet(sock, leave_packet)
                 self.broadcast_online_list()
  
     def stop(self):

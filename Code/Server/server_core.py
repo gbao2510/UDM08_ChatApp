@@ -229,6 +229,10 @@ class ServerCore:
                     # NHIỆM VỤ TUẦN 3: LƯU VÀ TRUYỀN THÔNG TIN AVATAR KHI CLIENT ĐĂNG NHẬP
                     # =========================================================================
                     if msg_type == "login":
+                        if current_username is not None:
+                            self.send_packet(client_socket, {"type": "error", "message": "Already logged in"})
+                            continue
+
                         # 1. Trích xuất tên người dùng username từ gói login (nếu rỗng thì đặt tên tạm theo Port)
                         current_username = message_dict.get("username", f"User_{client_address[1]}")
 
@@ -277,6 +281,9 @@ class ServerCore:
 
                     # Xử lý các gói tin chat thông thường nếu có
                     elif msg_type in ("msg", "message"):
+                        if current_username is None:
+                            self.logger.warning(f"Từ chối msg từ client chưa đăng nhập: {client_address}")
+                            continue
                         # Nếu gói tin chat chưa có trường avatar thì Server tự động đính kèm avatar của người gửi vào
                         if "avatar" not in message_dict or not message_dict.get("avatar"):
                             message_dict["avatar"] = current_avatar

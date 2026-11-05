@@ -9,7 +9,7 @@ class NetworkClient(QThread):
     disconnected_signal = pyqtSignal()      # Báo ngắt kết nối
     error_signal = pyqtSignal(str)          # Báo lỗi
 
-    def __init__(self, host='127.0.0.1', port=8888, parent=None):
+    def __init__(self, host='127.0.0.1', port=5000, parent=None):
         super().__init__(parent)
         self.host = host
         self.port = port
@@ -50,9 +50,6 @@ class NetworkClient(QThread):
                     break  # Server ngắt kết nối
 
                 buffer += data
-                
-                # CAMERA GIÁM SÁT: Đặt ngay cửa ngõ, trước mọi vòng lặp và hàm xử lý
-                print(f"--- BẮT TẠI TRẬN SERVER GỬI --- : {data}")
                 
                 while "\n" in buffer:
                     line, buffer = buffer.split("\n", 1)
