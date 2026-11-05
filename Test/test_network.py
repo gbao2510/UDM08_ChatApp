@@ -32,5 +32,7 @@ if __name__ == "__main__":
     if client.connect_to_server():
         # Gửi thử 1 gói tin JSON sau khi kết nối thành công
         QTimer.singleShot(500, lambda: client.send_data({"type": "ping", "message": "Hello Server"}))
+        # Gửi thử 1 Emoji qua hàm send_emoji
+        QTimer.singleShot(1000, lambda: client.send_emoji("🎉"))
 
     sys.exit(app.exec())
