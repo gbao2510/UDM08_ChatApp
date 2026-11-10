@@ -351,6 +351,10 @@ class ServerCore:
                     # NHIỆM VỤ TUẦN 3: LƯU VÀ TRUYỀN THÔNG TIN AVATAR KHI CLIENT ĐĂNG NHẬP
                     # =========================================================================
                     if msg_type == "login":
+                        if current_username is not None:
+                            self.send_packet(client_socket, {"type": "error", "message": "Already logged in"})
+                            continue
+
                         # 1. Trích xuất tên người dùng username từ gói login (nếu rỗng thì đặt tên tạm theo Port)
                         current_username = message_dict.get("username", f"User_{client_address[1]}")
 
