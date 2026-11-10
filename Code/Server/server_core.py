@@ -4,6 +4,7 @@ import json  # Thư viện làm việc và đóng/mở gói dữ liệu định 
 import logging  # Thư viện ghi nhật ký hoạt động (log) của hệ thống
 import sys  # Thư viện hệ thống để tương tác với cấu hình môi trường chạy
 import os  # Thư viện thao tác với tệp tin và đường dẫn thư mục hệ thống
+import datetime  # Thư viện lấy ngày giờ hệ thống cho dấu thời gian (timestamp)
 
 # Đảm bảo hiển thị tiếng Việt có dấu rõ ràng trên màn hình Console Windows mà không bị lỗi font
 if sys.stdout.encoding != 'utf-8':
@@ -30,6 +31,10 @@ class ServerCore:
         self.clients = {}
         # Khóa Lock để đảm bảo an toàn đa luồng (thread-safe), tránh xung đột khi nhiều luồng cùng đọc/ghi self.clients
         self.lock = threading.Lock()
+
+        # --- YÊU CẦU TUẦN 4: BỘ ĐẾM ID TIN NHẮN TỰ TĂNG CHO ĐIỀU HƯỚNG TIN NHẮN ---
+        # Biến đếm số lượng tin nhắn để gán msg_id duy nhất tăng dần cho mỗi tin
+        self.msg_counter = 0
 
         # Gọi hàm cài đặt cấu hình ghi log ngay khi ServerCore được khởi tạo
         self.setup_logger()
@@ -69,6 +74,21 @@ class ServerCore:
                 online_list.append(user_record)
             # Trả về danh sách chứa đầy đủ username và avatar của tất cả user đang online
             return online_list
+
+    def find_client_socket_by_username(self, username):
+        """
+        Nhiệm vụ Tuần 4: Tìm socket của một client dựa vào username để phục vụ điều hướng tin nhắn 1-1.
+        Trả về client_socket nếu tìm thấy, ngược lại trả về None.
+        """
+        # Sử dụng khóa lock để duyệt danh sách an toàn trong môi trường đa luồng
+        with self.lock:
+            # Duyệt qua từng cặp (socket, thông tin) trong dictionary self.clients
+            for sock, info in self.clients.items():
+                # So sánh tên người dùng không phân biệt khoảng trắng thừa
+                if info.get("username", "").strip() == str(username).strip():
+                    return sock  # Trả về socket của người nhận tìm thấy
+        # Trả về None nếu người dùng này hiện không online hoặc không tồn tại
+        return None
 
     def send_packet(self, client_socket, packet_dict):
         """Hàm hỗ trợ gửi 1 gói tin định dạng JSON (có kèm ký tự '\\n' ở cuối) tới 1 socket client cụ thể"""
@@ -121,6 +141,108 @@ class ServerCore:
 
         # Gọi hàm phát broadcast gói tin này tới các client
         self.broadcast_packet(packet, exclude_socket=exclude_socket)
+
+    def handle_forward_message(self, client_socket, current_username, current_avatar, message_dict):
+        """
+        =============================================================================
+        NHIỆM VỤ TUẦN 4: XỬ LÝ ĐIỀU HƯỚNG TIN NHẮN FORWARD (CHUYỂN TIẾP 1-1 HOẶC PHÒNG CHUNG)
+        =============================================================================
+        Tham số:
+        - client_socket: socket của người thực hiện chuyển tiếp tin nhắn
+        - current_username: tên của người gửi chuyển tiếp
+        - current_avatar: ảnh đại diện của người chuyển tiếp
+        - message_dict: gói tin forward nhận được từ client
+        """
+        # 1. Đảm bảo gán msg_id tự tăng duy nhất cho tin nhắn forward
+        with self.lock:
+            self.msg_counter += 1  # Tăng bộ đếm tin nhắn lên 1
+            msg_id = self.msg_counter  # Lấy mã định danh tin nhắn mới
+        message_dict["msg_id"] = msg_id  # Gán msg_id vào gói tin
+
+        # 2. Bổ sung thông tin người gửi (sender) và ảnh đại diện (avatar) nếu chưa có
+        message_dict["sender"] = current_username
+        if "avatar" not in message_dict or not message_dict.get("avatar"):
+            message_dict["avatar"] = current_avatar
+
+        # 3. Bổ sung dấu thời gian (timestamp) hiện tại nếu chưa có
+        if "timestamp" not in message_dict or not message_dict.get("timestamp"):
+            message_dict["timestamp"] = str(datetime.datetime.now().strftime("%H:%M:%S"))
+
+        # 4. Trích xuất thông tin người nhận (receiver)
+        receiver = message_dict.get("receiver", "all")
+
+        # -------------------------------------------------------------------------
+        # TRƯỜNG HỢP A: CHUYỂN TIẾP VÀO PHÒNG CHUNG (receiver == 'all' hoặc để trống)
+        # -------------------------------------------------------------------------
+        if not receiver or str(receiver).strip().lower() == "all":
+            # Đảm bảo trường receiver được chuẩn hóa thành 'all'
+            message_dict["receiver"] = "all"
+
+            # Ghi log thông báo điều hướng chuyển tiếp tin nhắn vào phòng chung
+            self.logger.info(
+                f"[FORWARD PHÒNG CHUNG] (ID:{msg_id}) Từ [{current_username}] "
+                f"tới phòng chung. Nội dung: '{message_dict.get('content', '')}'"
+            )
+
+            # Gửi broadcast gói tin forward tới tất cả các client khác (bỏ qua người gửi)
+            self.broadcast_packet(message_dict, exclude_socket=client_socket)
+
+            # Gửi gói phản hồi xác nhận (forward_ack) về cho chính người gửi
+            forward_ack = {
+                "type": "forward_ack",  # Loại gói tin xác nhận chuyển tiếp
+                "status": "success",  # Trạng thái thành công
+                "msg_id": msg_id,  # Mã định danh tin nhắn
+                "receiver": "all",  # Nơi nhận là phòng chung
+                "message": "Chuyển tiếp tin nhắn vào phòng chung thành công!"  # Thông báo chi tiết
+            }
+            self.send_packet(client_socket, forward_ack)
+
+        # -------------------------------------------------------------------------
+        # TRƯỜNG HỢP B: CHUYỂN TIẾP 1-1 (receiver là tên của 1 người dùng cụ thể)
+        # -------------------------------------------------------------------------
+        else:
+            target_username = str(receiver).strip()  # Tên người nhận cụ thể
+            # Tìm socket của người nhận trong danh sách đang online
+            target_socket = self.find_client_socket_by_username(target_username)
+
+            # Nếu tìm thấy người nhận đang online trên hệ thống
+            if target_socket:
+                # Ghi log thông báo điều hướng chuyển tiếp tin nhắn 1-1 thành công
+                self.logger.info(
+                    f"[FORWARD 1-1] (ID:{msg_id}) Từ [{current_username}] -> "
+                    f"Riêng [{target_username}]. Nội dung: '{message_dict.get('content', '')}'"
+                )
+
+                # Gửi gói tin forward trực tiếp tới socket của người nhận đó
+                self.send_packet(target_socket, message_dict)
+
+                # Gửi gói phản hồi xác nhận (forward_ack) về cho người gửi biết đã chuyển tiếp 1-1 thành công
+                forward_ack = {
+                    "type": "forward_ack",  # Loại gói tin xác nhận chuyển tiếp
+                    "status": "success",  # Trạng thái thành công
+                    "msg_id": msg_id,  # Mã định danh tin nhắn
+                    "receiver": target_username,  # Người nhận cụ thể
+                    "message": f"Chuyển tiếp tin nhắn tới '{target_username}' thành công!"  # Thông báo thành công
+                }
+                self.send_packet(client_socket, forward_ack)
+
+            # Nếu không tìm thấy người nhận (người nhận đang offline hoặc sai tên)
+            else:
+                # Ghi log cảnh báo người nhận không online
+                self.logger.warning(
+                    f"[FORWARD 1-1 THẤT BẠI] Từ [{current_username}] -> [{target_username}]: "
+                    f"Người nhận không online hoặc không tồn tại."
+                )
+
+                # Gửi gói phản hồi thông báo lỗi về cho người gửi
+                error_ack = {
+                    "type": "forward_ack",  # Loại gói tin xác nhận chuyển tiếp
+                    "status": "error",  # Trạng thái thất bại
+                    "msg_id": msg_id,  # Mã định danh tin nhắn
+                    "receiver": target_username,  # Người nhận không liên lạc được
+                    "message": f"Không thể chuyển tiếp: Người dùng '{target_username}' hiện không online."
+                }
+                self.send_packet(client_socket, error_ack)
 
     def start(self):
         """Khởi động TCP Socket Server và đưa Server vào trạng thái lắng nghe kết nối từ Client"""
@@ -275,15 +397,39 @@ class ServerCore:
                         # (b) Đồng thời cập nhật đồng bộ danh sách online mới nhất (chứa cả avatar) cho tất cả client khác
                         self.broadcast_online_list(exclude_socket=client_socket)
 
-                    # Xử lý các gói tin chat thông thường nếu có
-                    elif msg_type in ("msg", "message"):
-                        # Nếu gói tin chat chưa có trường avatar thì Server tự động đính kèm avatar của người gửi vào
+                    # =========================================================================
+                    # NHIỆM VỤ TUẦN 4: XỬ LÝ ĐIỀU HƯỚNG TIN NHẮN FORWARD (CHUYỂN TIẾP 1-1 HOẶC PHÒNG CHUNG)
+                    # =========================================================================
+                    elif msg_type == "forward":
+                        # Gọi hàm chuyên biệt xử lý điều hướng tin nhắn Forward theo yêu cầu tuần 4
+                        self.handle_forward_message(client_socket, current_username, current_avatar, message_dict)
+
+                    # Xử lý các gói tin tin nhắn thường và tin nhắn trả lời (reply)
+                    elif msg_type in ("msg", "message", "reply"):
+                        # Tự động gán msg_id tăng dần cho tin nhắn
+                        with self.lock:
+                            self.msg_counter += 1
+                            message_dict["msg_id"] = self.msg_counter
+
+                        # Đảm bảo có thông tin người gửi và avatar
+                        message_dict["sender"] = current_username
                         if "avatar" not in message_dict or not message_dict.get("avatar"):
                             message_dict["avatar"] = current_avatar
-                        # Ghi log nội dung tin nhắn chat
-                        self.logger.info(f"Tin nhắn từ [{current_username}]: {message_dict.get('content', '')}")
-                        # Chuyển tiếp (broadcast) tin nhắn này tới các client khác trong phòng
-                        self.broadcast_packet(message_dict, exclude_socket=client_socket)
+
+                        # Điều hướng theo người nhận (receiver)
+                        msg_receiver = message_dict.get("receiver", "all")
+                        if not msg_receiver or str(msg_receiver).strip().lower() == "all":
+                            # Gửi vào phòng chung
+                            self.logger.info(f"Tin nhắn [{msg_type}] từ [{current_username}] -> Phòng chung: {message_dict.get('content', '')}")
+                            self.broadcast_packet(message_dict, exclude_socket=client_socket)
+                        else:
+                            # Gửi riêng 1-1
+                            target_sock = self.find_client_socket_by_username(str(msg_receiver).strip())
+                            if target_sock:
+                                self.logger.info(f"Tin nhắn [{msg_type}] từ [{current_username}] -> Riêng [{msg_receiver}]: {message_dict.get('content', '')}")
+                                self.send_packet(target_sock, message_dict)
+                            else:
+                                self.logger.warning(f"Người nhận [{msg_receiver}] không online để nhận tin nhắn [{msg_type}].")
 
                     # Xử lý các loại thông điệp khác (ví dụ: ping, heartbeat...)
                     else:
@@ -354,7 +500,7 @@ if __name__ == "__main__":
     # Khởi tạo đối tượng ServerCore
     server = ServerCore(host=HOST, port=PORT)
 
-    print("=== UDM_08 TCP SERVER CORE (TUẦN 3 - LƯU VÀ TRUYỀN AVATAR KHI ĐĂNG NHẬP) ===")
+    print("=== UDM_08 TCP SERVER CORE (TUẦN 4 - ĐIỀU HƯỚNG FORWARD 1-1 VÀ PHÒNG CHUNG) ===")
     print("Server đang lắng nghe trên cổng 5000. Nhấn Ctrl + C để dừng Server.\n")
 
     try:
