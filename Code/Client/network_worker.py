@@ -128,6 +128,27 @@ class NetworkClient(QThread):
         }
         return self.send_data(payload)
 
+    def send_reply(self, reply_to_msg_id: int, content: str, target_room_or_user: str = "general",):
+        """Hàm gửi tin nhắn trả lời (Reply) một tin nhắn cụ thể theo msg_id."""
+        payload = {
+            "type": "reply",
+            "reply_to_msg_id": reply_to_msg_id,
+            "content": content,
+            "target": target_room_or_user,
+        }
+        self.send_data(payload)
+
+    def send_forward(self, original_msg_id: int, content: str, target_room_or_user: str, original_sender: str = "",):
+        """Hàm chuyển tiếp (Forward) một tin nhắn sang phòng/người dùng khác"""
+        payload = {
+            "type": "forward",
+            "original_msg_id": original_msg_id,
+            "content": content,
+            "original_sender": original_sender,
+            "target": target_room_or_user,
+        }
+        self.send_data(payload)
+
     def stop(self):
         """Dừng luồng an toàn khi tắt ứng dụng"""
         self.is_running = False
