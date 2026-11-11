@@ -16,6 +16,7 @@ if client_dir not in sys.path:
 
 from Code.Client.gui_actions import (
     EmojiPickerDialog, ForwardDialog, create_message_context_menu,
+    attach_context_menu_to_message,
     get_asset_path, get_asset_icon, get_asset_pixmap, ASSETS_DIR
 )
 from Test.clients import ResourceMonitor, save_report_to_file, REPORT_FILE
@@ -205,4 +206,106 @@ def test_context_menu_creation(qapp):
     assert any("Trả lời" in a for a in actions), "Thiếu action Reply"
     assert any("Chuyển tiếp" in a for a in actions), "Thiếu action Forward"
     assert any("Sao chép" in a for a in actions), "Thiếu action Copy"
+
+
+# =========================================================================
+# 5. KIỂM THỬ TUẦN 4 (NGÔ GIA BẢO): GẮN CONTEXT MENU CHUỘT PHẢI & POP-UP FORWARD
+# =========================================================================
+def test_forward_dialog_with_dict_users(qapp):
+    """Tuần 4: Kiểm tra ForwardDialog nhận danh sách người dùng dạng Dict (từ Server Tuần 3/4)"""
+    mock_dict_users = [
+        {"username": "Trần Thuận Trí", "avatar": "avatar_user1.png"},
+        {"username": "Trương Gia Bân", "avatar": "avatar_user2.png"},
+        {"username": "Lý Huỳnh Bích Trâm", "avatar": "avatar_user3.png"}
+    ]
+    dialog = ForwardDialog(message_content="Nội dung mật", online_users=mock_dict_users)
+    assert dialog.user_list_widget.count() == 4  # all + 3 users
+
+    # Kiểm tra receiver được trích xuất là username string thuần túy chứ không phải dict
+    dialog.user_list_widget.setCurrentRow(1)
+    current_item = dialog.user_list_widget.currentItem()
+    receiver = current_item.data(Qt.ItemDataRole.UserRole)
+    assert receiver == "Trần Thuận Trí"
+
+    received = []
+    dialog.forward_confirmed.connect(lambda rec, txt: received.append((rec, txt)))
+    dialog.on_confirm_forward()
+    assert received == [("Trần Thuận Trí", "Nội dung mật")]
+
+
+def test_forward_dialog_search_filter(qapp):
+    """Tuần 4: Kiểm tra tính năng lọc / tìm kiếm người nhận trong ForwardDialog"""
+    users = ["Trần Thuận Trí", "Trương Gia Bân", "Nguyễn Gia Bảo"]
+    dialog = ForwardDialog(message_content="Test search", online_users=users)
+
+    # Lọc theo từ khóa "Thuận"
+    dialog.txt_search.setText("Thuận")
+    visible_texts = [
+        dialog.user_list_widget.item(i).text()
+        for i in range(dialog.user_list_widget.count())
+        if not dialog.user_list_widget.item(i).isHidden()
+    ]
+    assert len(visible_texts) == 1
+    assert "Thuận Trí" in visible_texts[0]
+
+    # Xóa tìm kiếm -> hiển thị lại toàn bộ
+    dialog.txt_search.setText("")
+    visible_count = sum(
+        1 for i in range(dialog.user_list_widget.count())
+        if not dialog.user_list_widget.item(i).isHidden()
+    )
+    assert visible_count == 4  # all + 3 users
+
+
+def test_forward_dialog_dynamic_update_users(qapp):
+    """Tuần 4: Kiểm tra cập nhật danh sách người dùng realtime qua set_online_users"""
+    dialog = ForwardDialog(message_content="Test update", online_users=["A"])
+    assert dialog.user_list_widget.count() == 2  # all + A
+
+    dialog.set_online_users(["A", "B", "C"])
+    assert dialog.user_list_widget.count() == 4  # all + A + B + C
+
+
+def test_context_menu_forward_action_triggered(qapp):
+    """Tuần 4: Kiểm tra action Forward trong Context Menu kích hoạt callback chính xác"""
+    dummy_widget = QLineEdit()
+    msg_dict = {"sender": "Bảo", "content": "Tin nhắn chuyển tiếp"}
+
+    forward_called = []
+    menu = create_message_context_menu(
+        dummy_widget,
+        msg_dict,
+        on_forward=lambda m: forward_called.append(m)
+    )
+
+    # Tìm action Forward và kích hoạt
+    act_forward = next(a for a in menu.actions() if "Chuyển tiếp" in a.text())
+    act_forward.trigger()
+
+    assert len(forward_called) == 1
+    assert forward_called[0]["content"] == "Tin nhắn chuyển tiếp"
+
+
+def test_attach_context_menu_to_message(qapp):
+    """Tuần 4: Kiểm tra hàm tiện ích gắn Context Menu chuột phải lên widget tin nhắn"""
+    from PyQt6.QtWidgets import QWidget, QLabel, QVBoxLayout
+
+    # Tạo 1 widget bong bóng chat giả lập
+    bubble = QWidget()
+    layout = QVBoxLayout(bubble)
+    lbl_text = QLabel("Nội dung chat demo")
+    layout.addWidget(lbl_text)
+
+    msg_dict = {"sender": "Thuận Trí", "content": "Nội dung chat demo"}
+
+    attach_context_menu_to_message(
+        widget=bubble,
+        message_dict=msg_dict,
+        get_online_users=["all", "User1", "User2"]
+    )
+
+    # Widget và các con phải được cấu hình CustomContextMenu
+    assert bubble.contextMenuPolicy() == Qt.ContextMenuPolicy.CustomContextMenu
+    assert lbl_text.contextMenuPolicy() == Qt.ContextMenuPolicy.CustomContextMenu
+
 
