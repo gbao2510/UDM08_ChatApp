@@ -19,9 +19,10 @@ from PyQt6.QtGui import QFont
 
 # Liên kết module từ gui_actions.py, network_worker.py, gui_widgets.py
 try:
-    from gui_actions import EmojiPickerDialog
+    from gui_actions import EmojiPickerDialog, attach_context_menu_to_message
 except Exception:
     EmojiPickerDialog = None
+    attach_context_menu_to_message = None
 
 try:
     from network_worker import NetworkClient
@@ -42,6 +43,10 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Chat Application - Team Client (Tuần 2: Quản lý Online & Ghép Widgets)")
         self.resize(920, 650)
         self.setMinimumSize(780, 520)
+
+        # Trạng thái Reply hiện tại và danh sách user online để tái sử dụng cho menu hành động
+        self.replying_to = None
+        self.online_users_cache = []
 
         # Cài đặt giao diện & Mock data ban đầu
         self.setup_ui()
@@ -233,8 +238,59 @@ class MainWindow(QMainWindow):
         self.chat_content_layout.setSpacing(6)
         self.scroll_chat.setWidget(self.chat_container)
 
+        # Thanh trạng thái phụ trên khung chat: "Đang trả lời: [Tên]" kèm nút X hủy
+        self.reply_bar = QFrame()
+        self.reply_bar.setObjectName("replyStatusBar")
+        self.reply_bar.setStyleSheet("""
+            QFrame#replyStatusBar {
+                background-color: #242526;
+                border: 1px solid #393a3b;
+                border-left: 3px solid #0084ff;
+                border-radius: 6px;
+            }
+        """)
+        reply_bar_layout = QHBoxLayout(self.reply_bar)
+        reply_bar_layout.setContentsMargins(10, 6, 8, 6)
+        reply_bar_layout.setSpacing(8)
+
+        self.lbl_reply_status = QLabel("")
+        self.lbl_reply_status.setStyleSheet(
+            "border: none; color: #e4e6eb; font-size: 12px; font-weight: bold;"
+        )
+
+        self.lbl_reply_preview = QLabel("")
+        self.lbl_reply_preview.setStyleSheet(
+            "border: none; color: #b0b3b8; font-size: 12px; font-style: italic;"
+        )
+
+        self.btn_cancel_reply = QPushButton("X")
+        self.btn_cancel_reply.setFixedSize(22, 22)
+        self.btn_cancel_reply.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_cancel_reply.setToolTip("Hủy trả lời")
+        self.btn_cancel_reply.setStyleSheet("""
+            QPushButton {
+                background-color: #3a3b3c;
+                color: #e4e6eb;
+                font-weight: bold;
+                font-size: 11px;
+                border: none;
+                border-radius: 11px;
+            }
+            QPushButton:hover {
+                background-color: #fa5252;
+                color: #ffffff;
+            }
+        """)
+        self.btn_cancel_reply.clicked.connect(self.cancel_reply)
+
+        reply_bar_layout.addWidget(self.lbl_reply_status)
+        reply_bar_layout.addWidget(self.lbl_reply_preview, stretch=1)
+        reply_bar_layout.addWidget(self.btn_cancel_reply)
+        self.reply_bar.hide()
+
         chat_layout.addWidget(lbl_chat)
         chat_layout.addWidget(self.scroll_chat)
+        chat_layout.addWidget(self.reply_bar)
         body_layout.addLayout(chat_layout, stretch=1)
 
         main_layout.addLayout(body_layout, stretch=1)
@@ -314,6 +370,7 @@ class MainWindow(QMainWindow):
             {"name": "Ngô Gia Bảo",     "online": False, "is_self": False},
         ]
         self._clear_sidebar()
+        self.online_users_cache = [u["name"] for u in mock_users]
         for u in mock_users:
             row = self._make_user_row(name=u["name"], is_online=u["online"])
             self.sidebar_content_layout.addWidget(row)
@@ -433,7 +490,7 @@ class MainWindow(QMainWindow):
         khi nhận được signal từ Server qua NetworkClient
         """
         self._clear_sidebar()
-        my_name = self.txt_username.text().strip()
+        self.online_users_cache = []
 
         for user in user_list:
             if isinstance(user, dict):
@@ -446,6 +503,7 @@ class MainWindow(QMainWindow):
             if not name:
                 continue
 
+            self.online_users_cache.append(name)
             row = self._make_user_row(name=name, is_online=True, avatar_path=avatar)
             self.sidebar_content_layout.addWidget(row)
 
@@ -463,6 +521,8 @@ class MainWindow(QMainWindow):
             if w and username in w.findChild(QLabel).text():
                 return
 
+        if username not in self.online_users_cache:
+            self.online_users_cache.append(username)
         row = self._make_user_row(name=username, is_online=True, avatar_path=avatar_path)
         self.sidebar_content_layout.addWidget(row)
         count = self.sidebar_content_layout.count()
@@ -472,6 +532,8 @@ class MainWindow(QMainWindow):
         """Xóa 1 người dùng vừa rời mạng khỏi sidebar"""
         if not username:
             return
+        if username in self.online_users_cache:
+            self.online_users_cache.remove(username)
         for i in range(self.sidebar_content_layout.count()):
             w = self.sidebar_content_layout.itemAt(i).widget()
             if w:
@@ -484,18 +546,75 @@ class MainWindow(QMainWindow):
         count = self.sidebar_content_layout.count()
         self.lbl_online.setText(f"Online Users ({count})")
 
+    def get_online_usernames(self):
+        """Trả về danh sách tên người dùng online hiện tại cho ForwardDialog"""
+        return list(self.online_users_cache)
+
+    # =========================================================================
+    # NHIỆM VỤ TUẦN 4 (NGUYỄN GIA BẢO): THANH TRẠNG THÁI PHỤ KHI TRẢ LỜI (REPLY)
+    # =========================================================================
+    def start_reply(self, message_dict: dict):
+        """Hiển thị thanh trạng thái phụ 'Đang trả lời: [Tên]' kèm nút X hủy"""
+        if not isinstance(message_dict, dict):
+            return
+        sender = message_dict.get("sender") or "Ẩn danh"
+        content = message_dict.get("content") or message_dict.get("text") or ""
+
+        self.replying_to = dict(message_dict)
+        self.lbl_reply_status.setText(f"Đang trả lời: {sender}")
+
+        if content:
+            snippet = content if len(content) <= 60 else content[:57] + "..."
+            self.lbl_reply_preview.setText(f'"{snippet}"')
+            self.lbl_reply_preview.show()
+        else:
+            self.lbl_reply_preview.setText("")
+            self.lbl_reply_preview.hide()
+
+        self.reply_bar.show()
+        if hasattr(self, "txt_message") and self.txt_message:
+            self.txt_message.setFocus()
+
+    def cancel_reply(self):
+        """Hủy chế độ trả lời và ẩn thanh trạng thái phụ"""
+        self.replying_to = None
+        self.lbl_reply_status.setText("")
+        self.lbl_reply_preview.setText("")
+        self.reply_bar.hide()
+
+    def handle_forward_confirmed(self, receiver: str, content: str):
+        """Xử lý gửi gói tin chuyển tiếp (Forward) khi người dùng xác nhận trong ForwardDialog"""
+        if not content:
+            return
+        my_name = self.txt_username.text().strip() or "Gia Bảo"
+        if self.network_client and self.network_client.is_running:
+            if hasattr(self.network_client, "send_forward"):
+                self.network_client.send_forward(
+                    original_msg_id=0,
+                    content=content,
+                    target_room_or_user=receiver,
+                    original_sender=my_name,
+                )
+            else:
+                self.network_client.send_data({
+                    "type": "forward",
+                    "sender": my_name,
+                    "receiver": receiver,
+                    "content": content,
+                })
+        self.add_system_message(f"Đã chuyển tiếp tin nhắn tới {receiver}.")
+
     # =========================================================================
     # CÁC HÀM XỬ LÝ TIN NHẮN (TÍCH HỢP MESSAGEITEM TỪ GUI_WIDGETS.PY)
     # =========================================================================
-    def add_message_to_chat(self, sender: str, message: str, is_self: bool = False):
+    def add_message_to_chat(self, sender: str, message: str, is_self: bool = False, msg_id=None):
         """Thêm bong bóng tin nhắn Messenger (MessageItem) từ gui_widgets.py vào khung chat"""
         if MessageItem:
-            item = MessageItem(sender_name=sender, message=message, is_self=is_self)
-            self.chat_content_layout.addWidget(item)
+            widget_item = MessageItem(sender_name=sender, message=message, is_self=is_self)
         else:
-            lbl = QLabel(f"<b>{sender}</b>: {message}")
-            lbl.setWordWrap(True)
-            lbl.setStyleSheet("""
+            widget_item = QLabel(f"<b>{sender}</b>: {message}")
+            widget_item.setWordWrap(True)
+            widget_item.setStyleSheet("""
                 QLabel {
                     background-color: #3a3b3c;
                     color: #ffffff;
@@ -504,7 +623,22 @@ class MainWindow(QMainWindow):
                     font-size: 13px;
                 }
             """)
-            self.chat_content_layout.addWidget(lbl)
+
+        self.chat_content_layout.addWidget(widget_item)
+
+        if attach_context_menu_to_message:
+            msg_dict = {
+                "msg_id": msg_id,
+                "sender": sender,
+                "content": message,
+            }
+            attach_context_menu_to_message(
+                widget=widget_item,
+                message_dict=msg_dict,
+                get_online_users=self.get_online_usernames,
+                on_reply=self.start_reply,
+                on_forward_confirmed=self.handle_forward_confirmed,
+            )
 
         # Cuộn thanh cuộn xuống tin nhắn mới nhất
         QApplication.processEvents()
@@ -524,7 +658,7 @@ class MainWindow(QMainWindow):
         )
 
     def send_message(self):
-        """Gửi tin nhắn đi"""
+        """Gửi tin nhắn đi (hỗ trợ cả tin nhắn thường và Reply)"""
         if hasattr(self.txt_message, 'toPlainText'):
             text = self.txt_message.toPlainText().strip()
         else:
@@ -534,23 +668,44 @@ class MainWindow(QMainWindow):
             return
 
         my_name = self.txt_username.text().strip() or "Gia Bảo"
+        reply_info = self.replying_to
+
+        if reply_info:
+            reply_sender = reply_info.get("sender", "Ẩn danh")
+            display_msg = f"↩️ Trả lời {reply_sender}: {text}"
+        else:
+            display_msg = text
 
         # Hiển thị tin nhắn của chính mình lên khung chat
-        self.add_message_to_chat(sender=my_name, message=text, is_self=True)
+        self.add_message_to_chat(sender=my_name, message=display_msg, is_self=True)
 
         # Xóa ô nhập và reset chiều cao nếu là AutoResizingTextEdit
         self.txt_message.clear()
         if hasattr(self.txt_message, 'adjust_height'):
             self.txt_message.setFixedHeight(self.txt_message.min_height)
 
+        # Hủy thanh trạng thái Reply sau khi gửi
+        if reply_info:
+            self.cancel_reply()
+
         # Gửi dữ liệu qua NetworkClient nếu đã kết nối Server
         if self.network_client and self.network_client.is_running:
-            payload = {
-                "type": "msg",
-                "sender": my_name,
-                "receiver": "all",
-                "content": text
-            }
+            if reply_info:
+                payload = {
+                    "type": "reply",
+                    "sender": my_name,
+                    "receiver": "all",
+                    "content": text,
+                    "reply_to": reply_info,
+                    "reply_to_msg_id": reply_info.get("msg_id") or 0,
+                }
+            else:
+                payload = {
+                    "type": "msg",
+                    "sender": my_name,
+                    "receiver": "all",
+                    "content": text,
+                }
             self.network_client.send_data(payload)
 
     # =========================================================================
@@ -676,15 +831,24 @@ class MainWindow(QMainWindow):
                 self.add_system_message(f"{left_user} đã rời phòng chat.")
             return
 
-        # 4. Bắt tin nhắn chat thông thường -> hiển thị qua bong bóng MessageItem
+        # 4. Bắt tin nhắn chat thông thường / reply / forward -> hiển thị qua bong bóng MessageItem
         sender = data.get("sender", "Server")
         content = data.get("content", str(data))
+        msg_id = data.get("msg_id")
+        if msg_type == "reply" and isinstance(data.get("reply_to"), dict):
+            reply_sender = data["reply_to"].get("sender", "Ẩn danh")
+            content = f"↩️ Trả lời {reply_sender}: {content}"
+        elif msg_type == "forward":
+            orig_sender = data.get("original_sender", "")
+            if orig_sender:
+                content = f"↗️ Chuyển tiếp từ {orig_sender}: {content}"
+
         my_name = self.txt_username.text().strip()
         is_self = (sender == my_name) or (sender == "Bạn")
         
         # Chỉ vẽ nếu tin nhắn không phải từ chính mình gửi lại (tránh bị lặp tin 2 lần)
         if not is_self:
-            self.add_message_to_chat(sender=sender, message=content, is_self=False)
+            self.add_message_to_chat(sender=sender, message=content, is_self=False, msg_id=msg_id)
 
     def demo_emoji_click(self):
         """Mở Emoji Picker từ gui_actions.py"""
