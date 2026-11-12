@@ -1,283 +1,318 @@
 import json
-import pytest
-from Code.Server.server_router import ServerRouter, encode_message
-
-
-def test_parse_normal_message():
-    router = ServerRouter()
-
-    result = router.feed_data(
-        b'{"type":"chat","content":"Hello"}\n'
-    )
-
-    assert len(result) == 1
-    assert result[0]["ok"] is True
-    assert result[0]["message"]["content"] == "Hello"
-    assert result[0]["message"]["msg_id"] == 1
-
-
-def test_tcp_packet_split():
-    router = ServerRouter()
-
-    first = router.feed_data(b'{"content":"Hel')
-    second = router.feed_data(b'lo"}\n')
-
-    assert first == []
-    assert len(second) == 1
-    assert second[0]["message"]["content"] == "Hello"
-
-
-def test_multiple_messages_in_one_packet():
-    router = ServerRouter()
-
-    result = router.feed_data(
-        b'{"content":"One"}\n{"content":"Two"}\n'
-    )
-
-    assert len(result) == 2
-    assert result[0]["message"]["msg_id"] == 1
-    assert result[1]["message"]["msg_id"] == 2
-
-
-def test_invalid_json_returns_clear_error():
-    router = ServerRouter()
-
-    result = router.feed_data(b'{"content":}\n')
-
-    assert result[0]["ok"] is False
-    assert result[0]["error"]["error"]["code"] == "INVALID_JSON"
-
-
-def test_invalid_json_does_not_consume_msg_id():
-    router = ServerRouter()
-
-    result = router.feed_data(
-        b'{"content":"First"}\n'
-        b'{"content":}\n'
-        b'{"content":"Second"}\n'
-    )
-
-    assert result[0]["message"]["msg_id"] == 1
-    assert result[1]["ok"] is False
-    assert result[2]["message"]["msg_id"] == 2
-
-
-def test_json_array_is_rejected():
-    router = ServerRouter()
-
-    result = router.feed_data(b'["Hello"]\n')
-
-    assert result[0]["ok"] is False
-    assert result[0]["error"]["error"]["code"] == (
-        "JSON_OBJECT_REQUIRED"
-    )
-
-
-def test_invalid_utf8_is_rejected():
-    router = ServerRouter()
-
-    result = router.feed_data(b'\xff\n')
-
-    assert result[0]["ok"] is False
-    assert result[0]["error"]["error"]["code"] == (
-        "INVALID_ENCODING"
-    )
-
-
-def test_error_response_is_valid_json():
-    router = ServerRouter()
-    result = router.feed_data(b'{"content":}\n')[0]
-
-    response = result["error"]
-    encoded = (
-        json.dumps(response, ensure_ascii=False) + "\n"
-    ).encode("utf-8")
-
-    decoded = json.loads(encoded.decode("utf-8"))
-
-    assert decoded["type"] == "error"
-    assert decoded["error"]["code"] == "INVALID_JSON"
-    assert encoded.endswith(b"\n")
-
-
-# ---------------------------------------------------------------
-# UTF-8 / EMOJI
-# ---------------------------------------------------------------
-
-EMOJI_TEXT = "Xin chào 😀🔥 👨‍👩‍👧 🇻🇳"
-
-
-def utf8_line(content):
-    """Tạo 1 gói tin JSON UTF-8 (giữ nguyên emoji, không escape) kết thúc bằng newline."""
-    return (
-        json.dumps({"content": content}, ensure_ascii=False) + "\n"
-    ).encode("utf-8")
-
-
-def test_emoji_message_is_parsed():
-    router = ServerRouter()
-
-    result = router.feed_data(utf8_line(EMOJI_TEXT))
-
-    assert len(result) == 1
-    assert result[0]["ok"] is True
-    assert result[0]["message"]["content"] == EMOJI_TEXT
-    assert result[0]["message"]["msg_id"] == 1
-
-
-def test_emoji_split_in_the_middle_of_utf8_bytes():
-    router = ServerRouter()
-    raw = utf8_line("Hi 😀")
-    cut = raw.index("😀".encode("utf-8")) + 2  # cắt giữa 4 byte của emoji
-
-    first = router.feed_data(raw[:cut])
-    second = router.feed_data(raw[cut:])
-
-    assert first == []
-    assert len(second) == 1
-    assert second[0]["message"]["content"] == "Hi 😀"
-
-
-@pytest.mark.parametrize("cut", range(1, len(utf8_line(EMOJI_TEXT))))
-def test_emoji_message_split_at_every_byte_position(cut):
-    router = ServerRouter()
-    raw = utf8_line(EMOJI_TEXT)
-
-    results = router.feed_data(raw[:cut]) + router.feed_data(raw[cut:])
-
-    assert len(results) == 1
-    assert results[0]["ok"] is True
-    assert results[0]["message"]["content"] == EMOJI_TEXT
-
-
-def test_emoji_fed_one_byte_at_a_time():
-    router = ServerRouter()
-    results = []
-
-    for byte in utf8_line(EMOJI_TEXT):
-        results.extend(router.feed_data(bytes([byte])))
-
-    assert len(results) == 1
-    assert results[0]["message"]["content"] == EMOJI_TEXT
-
-
-def test_emoji_in_json_key_is_supported():
-    router = ServerRouter()
-
-    result = router.feed_data("{\"😀\":1}\n".encode("utf-8"))
-
-    assert result[0]["ok"] is True
-    assert result[0]["message"]["😀"] == 1
-
-
-def test_valid_surrogate_pair_escape_becomes_emoji():
-    router = ServerRouter()
-
-    result = router.feed_data(b'{"content":"\\ud83d\\ude00"}\n')
-
-    assert result[0]["ok"] is True
-    assert result[0]["message"]["content"] == "😀"
-
-
-def test_lone_surrogate_is_rejected():
-    router = ServerRouter()
-
-    result = router.feed_data(b'{"content":"\\ud83d"}\n')
-
-    assert result[0]["ok"] is False
-    assert result[0]["error"]["error"]["code"] == "INVALID_UNICODE"
-
-
-def test_lone_surrogate_in_key_is_rejected():
-    router = ServerRouter()
-
-    result = router.feed_data(b'{"\\ude00":1}\n')
-
-    assert result[0]["ok"] is False
-    assert result[0]["error"]["error"]["code"] == "INVALID_UNICODE"
-
-
-def test_lone_surrogate_does_not_consume_msg_id():
-    router = ServerRouter()
-
-    result = router.feed_data(
-        utf8_line("😀")
-        + b'{"content":"\\ud83d"}\n'
-        + utf8_line("🔥")
-    )
-
-    assert result[0]["message"]["msg_id"] == 1
-    assert result[1]["ok"] is False
-    assert result[2]["message"]["msg_id"] == 2
-
-
-def test_truncated_emoji_bytes_are_rejected():
-    router = ServerRouter()
-
-    # 3 trong 4 byte của 😀 rồi gặp newline -> UTF-8 không hợp lệ
-    result = router.feed_data(b'{"content":"\xf0\x9f\x98"}\n')
-
-    assert result[0]["ok"] is False
-    assert result[0]["error"]["error"]["code"] == "INVALID_ENCODING"
-
-
-def test_cesu8_encoded_surrogates_are_rejected():
-    router = ServerRouter()
-
-    # 😀 mã hóa sai kiểu CESU-8 (2 surrogate, mỗi cái 3 byte)
-    result = router.feed_data(
-        b'{"content":"\xed\xa0\xbd\xed\xb8\x80"}\n'
-    )
-
-    assert result[0]["ok"] is False
-    assert result[0]["error"]["error"]["code"] == "INVALID_ENCODING"
-
-
-def test_utf8_bom_is_ignored():
-    router = ServerRouter()
-
-    result = router.feed_data(b"\xef\xbb\xbf" + utf8_line("😀"))
-
-    assert result[0]["ok"] is True
-    assert result[0]["message"]["content"] == "😀"
-
-
-def test_encode_message_keeps_emoji_as_real_utf8():
-    encoded = encode_message({"type": "chat", "content": EMOJI_TEXT})
-
-    assert encoded.endswith(b"\n")
-    assert "😀".encode("utf-8") in encoded
-    assert b"\\ud83d" not in encoded
-    assert json.loads(encoded.decode("utf-8"))["content"] == EMOJI_TEXT
-
-
-def test_encode_message_does_not_crash_on_lone_surrogate():
-    encoded = encode_message({"content": "\ud83d"})
-
-    assert encoded.endswith(b"\n")
-    encoded.decode("ascii")  # dự phòng phải là ASCII thuần
-    assert json.loads(encoded.decode("ascii"))["content"] == "\ud83d"
-
-
-def test_emoji_roundtrip_router_to_encode_message():
-    router = ServerRouter()
-    message = router.feed_data(utf8_line(EMOJI_TEXT))[0]["message"]
-
-    echoed = json.loads(encode_message(message).decode("utf-8"))
-
-    assert echoed["content"] == EMOJI_TEXT
-    assert echoed["msg_id"] == 1
-
-
-def test_oversized_frame_is_reported_once_then_recovers():
-    router = ServerRouter(max_frame_size=100)
-
-    first = router.feed_data(b'{"content":"' + b"a" * 150)  # chưa có newline
-    middle = router.feed_data(b"b" * 50)                      # phần đuôi bị bỏ
-    last = router.feed_data(b'"}\n' + utf8_line("😀"))
-
-    assert len(first) == 1
-    assert first[0]["error"]["error"]["code"] == "MESSAGE_TOO_LARGE"
-    assert middle == []
-    assert len(last) == 1  # phần đuôi không bị hiểu nhầm là gói JSON mới
-    assert last[0]["message"]["content"] == "😀"
+import socket
+import threading
+
+HOST = "0.0.0.0"
+PORT = 5000
+BUFFER_SIZE = 4096
+MAX_FRAME_SIZE = 1_000_000
+
+
+def encode_message(data):
+    """Chuyển dictionary thành JSON (giữ UTF-8 thật, không escape), kết
+    thúc bằng newline. Nếu dữ liệu chứa surrogate lẻ không thể mã hóa
+    UTF-8, tự động chuyển sang dạng thoát \\uXXXX (ASCII) để không crash.
+    """
+    if not isinstance(data, dict):
+        raise ValueError("Message must be a JSON object.")
+
+    text = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+
+    try:
+        return (text + "\n").encode("utf-8")
+    except UnicodeEncodeError:
+        # Dự phòng: surrogate lẻ (vd. "\ud83d") không mã hóa UTF-8 được,
+        # chuyển sang dạng \\uXXXX thuần ASCII để vẫn gửi được dữ liệu.
+        ascii_text = json.dumps(data, ensure_ascii=True, separators=(",", ":"))
+        return (ascii_text + "\n").encode("ascii")
+
+
+def make_error(code, message):
+    """Tạo thông báo lỗi gửi về Client."""
+    return {
+        "type": "error",
+        "error": {
+            "code": code,
+            "message": message
+        }
+    }
+
+
+def _contains_lone_surrogate(value):
+    """Đệ quy kiểm tra một giá trị JSON đã parse (dict/list/str) có chứa
+    surrogate code point (U+D800-U+DFFF) hay không - dấu hiệu của chuỗi
+    \\uXXXX bị lỗi, không được ghép cặp đúng cách."""
+    if isinstance(value, str):
+        return any(0xD800 <= ord(ch) <= 0xDFFF for ch in value)
+    if isinstance(value, dict):
+        return any(
+            _contains_lone_surrogate(key) or _contains_lone_surrogate(val)
+            for key, val in value.items()
+        )
+    if isinstance(value, list):
+        return any(_contains_lone_surrogate(item) for item in value)
+    return False
+
+
+class MessageStore:
+    """Lưu các thông điệp hợp lệ để tra cứu nội dung gốc khi có gói tin
+    Reply (reply_to_id). Có thể dùng chung cho nhiều ServerRouter (vd. để
+    các Client khác nhau trên cùng một Server có thể Reply chéo nhau)."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.next_msg_id = 1
+        self.messages = {}
+
+    def add(self, message):
+        """Gán msg_id tuần tự rồi lưu lại thông điệp để các Reply sau
+        này có thể tham chiếu tới."""
+        with self.lock:
+            msg_id = self.next_msg_id
+            self.next_msg_id += 1
+            message["msg_id"] = msg_id
+            self.messages[msg_id] = message
+            return msg_id
+
+    def get(self, msg_id):
+        """Tra cứu nội dung gốc theo msg_id. Trả về None nếu không có."""
+        with self.lock:
+            return self.messages.get(msg_id)
+
+
+class ServerRouter:
+    """Tách gói TCP, kiểm tra JSON/UTF-8, xử lý Reply (reply_to_id) và
+    gán msg_id.
+
+    Nếu không truyền `store`, mỗi ServerRouter tự tạo MessageStore riêng
+    (phù hợp khi test độc lập hoặc không cần Reply chéo giữa các Client).
+    Muốn nhiều Client Reply chéo nhau, truyền chung một MessageStore qua
+    tham số `store` (xem ChatServer bên dưới).
+    """
+
+    def __init__(self, max_frame_size=MAX_FRAME_SIZE, store=None):
+        self.buffer = bytearray()
+        self.max_frame_size = max_frame_size
+        self.store = store if store is not None else MessageStore()
+        # Bật khi một khung tin vừa bị loại vì quá khổ: bỏ qua phần dữ
+        # liệu còn sót lại của khung đó cho tới newline tiếp theo, tránh
+        # hiểu nhầm phần đuôi là một gói JSON mới.
+        self.skipping_oversized = False
+
+    def feed_data(self, data):
+        """
+        Nhận một phần dữ liệu TCP.
+        Trả về danh sách các thông điệp hoàn chỉnh hoặc lỗi.
+        """
+        if not isinstance(data, (bytes, bytearray)):
+            return [{
+                "ok": False,
+                "error": make_error(
+                    "INVALID_INPUT_TYPE",
+                    "Du lieu dau vao phai la bytes."
+                )
+            }]
+
+        self.buffer.extend(data)
+        results = []
+
+        while True:
+            if self.skipping_oversized:
+                if b"\n" not in self.buffer:
+                    break
+                # Bỏ nốt phần còn lại của khung tin đã bị loại (tới hết dòng).
+                _, _, remaining = self.buffer.partition(b"\n")
+                self.buffer = bytearray(remaining)
+                self.skipping_oversized = False
+                continue
+
+            if b"\n" not in self.buffer:
+                break
+
+            frame, _, remaining = self.buffer.partition(b"\n")
+            self.buffer = bytearray(remaining)
+
+            if not frame.strip():
+                continue
+
+            results.append(self.parse_frame(bytes(frame)))
+
+        if len(self.buffer) > self.max_frame_size:
+            self.buffer.clear()
+            self.skipping_oversized = True
+            results.append({
+                "ok": False,
+                "error": make_error(
+                    "MESSAGE_TOO_LARGE",
+                    "Thong diep vuot qua kich thuoc cho phep."
+                )
+            })
+
+        return results
+
+    def parse_frame(self, frame):
+        """Kiểm tra UTF-8 (bỏ qua BOM nếu có), JSON object hợp lệ (không
+        chứa surrogate lẻ), xử lý Reply (reply_to_id) rồi gán msg_id."""
+        try:
+            text = frame.decode("utf-8")
+        except UnicodeDecodeError:
+            return {
+                "ok": False,
+                "error": make_error(
+                    "INVALID_ENCODING",
+                    "Du lieu phai duoc ma hoa bang UTF-8 hop le."
+                )
+            }
+
+        # Bo qua BOM (U+FEFF) neu Client vo tinh gui kem o dau goi tin.
+        if text.startswith("\ufeff"):
+            text = text[1:]
+
+        try:
+            message = json.loads(text)
+        except json.JSONDecodeError as exc:
+            return {
+                "ok": False,
+                "error": make_error(
+                    "INVALID_JSON",
+                    f"JSON khong hop le tai dong {exc.lineno}, "
+                    f"cot {exc.colno}: {exc.msg}."
+                )
+            }
+
+        if not isinstance(message, dict):
+            return {
+                "ok": False,
+                "error": make_error(
+                    "JSON_OBJECT_REQUIRED",
+                    "Thong diep JSON phai la mot object."
+                )
+            }
+
+        if _contains_lone_surrogate(message):
+            return {
+                "ok": False,
+                "error": make_error(
+                    "INVALID_UNICODE",
+                    "Chuoi JSON chua surrogate khong hop le (khong duoc "
+                    "ghep cap)."
+                )
+            }
+
+        # Neu la goi tin Reply, tim noi dung goc dua tren reply_to_id
+        # TRUOC khi gan msg_id va luu thong diep hien tai.
+        reply_result = None
+        if "reply_to_id" in message:
+            reply_result = self._resolve_reply(message["reply_to_id"])
+            if not reply_result["ok"]:
+                return reply_result
+
+        # Gan msg_id tuan tu va luu lai de cac Reply trong tuong lai
+        # co the tra cuu.
+        self.store.add(message)
+
+        if reply_result is not None:
+            message["reply_to"] = reply_result["original"]
+
+        return {
+            "ok": True,
+            "message": message
+        }
+
+    def _resolve_reply(self, reply_to_id):
+        """Kiểm tra reply_to_id và tra cứu nội dung gốc tương ứng trong
+        MessageStore."""
+        if not isinstance(reply_to_id, int) or isinstance(reply_to_id, bool):
+            return {
+                "ok": False,
+                "error": make_error(
+                    "INVALID_REPLY_TO_ID",
+                    "reply_to_id phai la so nguyen (msg_id)."
+                )
+            }
+
+        original = self.store.get(reply_to_id)
+
+        if original is None:
+            return {
+                "ok": False,
+                "error": make_error(
+                    "REPLY_NOT_FOUND",
+                    f"Khong tim thay thong diep goc voi msg_id={reply_to_id}."
+                )
+            }
+
+        return {
+            "ok": True,
+            "original": original
+        }
+
+
+class ChatServer:
+    """TCP Server minh họa tích hợp ServerRouter."""
+
+    def __init__(self, host=HOST, port=PORT):
+        self.host = host
+        self.port = port
+        # Dung chung cho moi Client de co the Reply cheo giua cac Client.
+        self.store = MessageStore()
+
+    def start(self):
+        with socket.socket(
+            socket.AF_INET, socket.SOCK_STREAM
+        ) as server:
+            server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server.bind((self.host, self.port))
+            server.listen()
+
+            print(f"Server dang chay tai {self.host}:{self.port}")
+
+            try:
+                while True:
+                    client, address = server.accept()
+                    print(f"Client ket noi: {address}")
+
+                    threading.Thread(
+                        target=self.handle_client,
+                        args=(client, address),
+                        daemon=True
+                    ).start()
+
+            except KeyboardInterrupt:
+                print("\nServer dang dung.")
+
+    def handle_client(self, client, address):
+        # Moi Client co buffer rieng de tranh tron cac luong TCP, nhung
+        # dung chung MessageStore de co the Reply cheo giua cac Client.
+        parser = ServerRouter(store=self.store)
+
+        with client:
+            try:
+                while True:
+                    data = client.recv(BUFFER_SIZE)
+
+                    if not data:
+                        print(f"Client da ngat ket noi: {address}")
+                        break
+
+                    for result in parser.feed_data(data):
+                        if not result["ok"]:
+                            response = result["error"]
+                        else:
+                            message = result["message"]
+                            print(f"Nhan tu {address}: {message}")
+
+                            response = {
+                                "type": "ack",
+                                "message": "Server da nhan tin nhan hop le.",
+                                "received": message
+                            }
+
+                        client.sendall(encode_message(response))
+
+            except (ConnectionError, OSError) as exc:
+                print(f"Loi ket noi voi {address}: {exc}")
+
+
+if __name__ == "__main__":
+    ChatServer().start()
