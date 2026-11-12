@@ -74,17 +74,35 @@ def make_error(code, message):
  
  
 class MessageIdGenerator:
-    """Bộ sinh msg_id tuần tự, dùng chung cho mọi Client (an toàn đa luồng)."""
+    """Bộ sinh msg_id tuần tự, dùng chung cho mọi Client (an toàn đa luồng).
+    Đồng thời lưu lại nội dung các thông điệp hợp lệ để tra cứu khi có gói
+    tin Reply (reply_to_id)."""
  
     def __init__(self, start=1):
         self._next = start
         self._lock = threading.Lock()
+        self._messages = {}
  
     def next_id(self):
         with self._lock:
             value = self._next
             self._next += 1
             return value
+ 
+    def register(self, message):
+        """Gán msg_id tuần tự cho message rồi lưu lại để các Reply sau
+        này có thể tra cứu nội dung gốc. Trả về msg_id vừa gán."""
+        with self._lock:
+            msg_id = self._next
+            self._next += 1
+            message["msg_id"] = msg_id
+            self._messages[msg_id] = message
+            return msg_id
+ 
+    def get_message(self, msg_id):
+        """Tra cứu nội dung gốc theo msg_id. Trả về None nếu không có."""
+        with self._lock:
+            return self._messages.get(msg_id)
  
  
 # =====================================================================
@@ -216,12 +234,51 @@ class ServerRouter:
                 )
             }
  
-        # Server tự cấp msg_id (ghi đè nếu Client có gửi kèm).
-        message["msg_id"] = self.id_generator.next_id()
+        # Neu la goi tin Reply, tim noi dung goc dua tren reply_to_id
+        # TRUOC khi gan msg_id va luu thong diep hien tai.
+        reply_result = None
+        if "reply_to_id" in message:
+            reply_result = self._resolve_reply(message["reply_to_id"])
+            if not reply_result["ok"]:
+                return reply_result
+ 
+        # Server tự cấp msg_id (ghi đè nếu Client có gửi kèm) và lưu lại
+        # để các Reply trong tương lai có thể tra cứu.
+        self.id_generator.register(message)
+ 
+        if reply_result is not None:
+            message["reply_to"] = reply_result["original"]
  
         return {
             "ok": True,
             "message": message
+        }
+ 
+    def _resolve_reply(self, reply_to_id):
+        """Kiểm tra reply_to_id và tra cứu nội dung gốc tương ứng."""
+        if not isinstance(reply_to_id, int) or isinstance(reply_to_id, bool):
+            return {
+                "ok": False,
+                "error": make_error(
+                    "INVALID_REPLY_TO_ID",
+                    "reply_to_id phai la so nguyen (msg_id)."
+                )
+            }
+ 
+        original = self.id_generator.get_message(reply_to_id)
+ 
+        if original is None:
+            return {
+                "ok": False,
+                "error": make_error(
+                    "REPLY_NOT_FOUND",
+                    f"Khong tim thay thong diep goc voi msg_id={reply_to_id}."
+                )
+            }
+ 
+        return {
+            "ok": True,
+            "original": original
         }
  
  
@@ -444,7 +501,16 @@ class ServerCore:
             ))
             return current_username
  
-        # Tin nhắn thường, ping,... (xử lý chi tiết ở các tuần sau)
+        # Tin nhắn thường, broadcast sang các client khác
+        if msg_type in ("msg", "message"):
+            with self.lock:
+                targets = [s for s in self.clients if s != client_socket]
+            for sock in targets:
+                self.send_packet(sock, message)
+            self.logger.info(f"Broadcast msg từ [{current_username}] tới {len(targets)} client")
+            return current_username
+
+        # Tin nhắn thường khác, ping,... (xử lý chi tiết ở các tuần sau)
         self.logger.info(
             f"Nhận tin nhắn loại '{msg_type}' (msg_id={message['msg_id']}) "
             f"từ [{current_username}]: {message}"
@@ -500,8 +566,16 @@ class ServerCore:
  
             self.logger.info(f"Đã giải phóng tài nguyên của [{current_username}] ({client_address}).")
  
-            # Client đã đăng nhập rời đi: báo lại danh sách online cho những người còn lại
+            # Client đã đăng nhập rời đi: gửi user_leave và cập nhật lại danh sách online cho những người còn lại
             if current_username:
+                leave_packet = {
+                    "type": "user_leave",
+                    "username": current_username
+                }
+                with self.lock:
+                    remaining_sockets = list(self.clients.keys())
+                for sock in remaining_sockets:
+                    self.send_packet(sock, leave_packet)
                 self.broadcast_online_list()
  
     def stop(self):
@@ -548,4 +622,3 @@ def main():
  
 if __name__ == "__main__":
     main()
- 
