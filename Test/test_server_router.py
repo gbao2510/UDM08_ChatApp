@@ -99,3 +99,55 @@ def test_error_response_is_valid_json():
     assert decoded["type"] == "error"
     assert decoded["error"]["code"] == "INVALID_JSON"
     assert encoded.endswith(b"\n")
+
+
+def test_reply_to_id_resolves_original_message():
+    router = ServerRouter()
+
+    # 1. Gửi tin nhắn gốc
+    r1 = router.feed_data(b'{"type":"msg","content":"Tin goc"}\n')
+    assert r1[0]["ok"] is True
+    original_id = r1[0]["message"]["msg_id"]
+    assert original_id == 1
+
+    # 2. Gửi tin nhắn reply theo reply_to_id
+    reply_payload = f'{{"type":"reply","reply_to_id":{original_id},"content":"Tin phan hoi"}}\n'.encode("utf-8")
+    r2 = router.feed_data(reply_payload)
+    assert r2[0]["ok"] is True
+    reply_msg = r2[0]["message"]
+    assert reply_msg["msg_id"] == 2
+    assert "reply_to" in reply_msg
+    assert reply_msg["reply_to"]["content"] == "Tin goc"
+    assert reply_msg["reply_to"]["msg_id"] == 1
+
+
+def test_reply_to_msg_id_supported():
+    router = ServerRouter()
+
+    # Gửi tin nhắn gốc
+    r1 = router.feed_data(b'{"type":"msg","content":"Original"}\n')
+    assert r1[0]["ok"] is True
+
+    # Gửi tin nhắn reply dùng tên trường reply_to_msg_id
+    r2 = router.feed_data(b'{"type":"reply","reply_to_msg_id":1,"content":"Response"}\n')
+    assert r2[0]["ok"] is True
+    assert r2[0]["message"]["reply_to"]["content"] == "Original"
+
+
+def test_reply_to_id_not_found_returns_error():
+    router = ServerRouter()
+
+    # Gửi reply cho một msg_id không tồn tại
+    r = router.feed_data(b'{"type":"reply","reply_to_id":999,"content":"Lost"}\n')
+    assert r[0]["ok"] is False
+    assert r[0]["error"]["error"]["code"] == "REPLY_NOT_FOUND"
+
+
+def test_invalid_reply_to_id_type_rejected():
+    router = ServerRouter()
+
+    # reply_to_id không phải số nguyên
+    r = router.feed_data(b'{"type":"reply","reply_to_id":"abc","content":"Bad ID"}\n')
+    assert r[0]["ok"] is False
+    assert r[0]["error"]["error"]["code"] == "INVALID_REPLY_TO_ID"
+

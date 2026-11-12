@@ -6,6 +6,18 @@ import sys  # Thư viện hệ thống để tương tác với cấu hình môi
 import os  # Thư viện thao tác với tệp tin và đường dẫn thư mục hệ thống
 import datetime  # Thư viện lấy ngày giờ hệ thống cho dấu thời gian (timestamp)
 
+# Nạp ServerRouter và tiện ích từ server_router.py
+try:
+    from Code.Server.server_router import ServerRouter, MessageIdGenerator, validate_username
+except ImportError:
+    try:
+        from server_router import ServerRouter, MessageIdGenerator, validate_username
+    except ImportError:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        if current_dir not in sys.path:
+            sys.path.insert(0, current_dir)
+        from server_router import ServerRouter, MessageIdGenerator, validate_username
+
 # Đảm bảo hiển thị tiếng Việt có dấu rõ ràng trên màn hình Console Windows mà không bị lỗi font
 if sys.stdout.encoding != 'utf-8':
     try:
@@ -32,8 +44,8 @@ class ServerCore:
         # Khóa Lock để đảm bảo an toàn đa luồng (thread-safe), tránh xung đột khi nhiều luồng cùng đọc/ghi self.clients
         self.lock = threading.Lock()
 
-        # --- YÊU CẦU TUẦN 4: BỘ ĐẾM ID TIN NHẮN TỰ TĂNG CHO ĐIỀU HƯỚNG TIN NHẮN ---
-        # Biến đếm số lượng tin nhắn để gán msg_id duy nhất tăng dần cho mỗi tin
+        # --- NỐI SERVERROUTER: BỘ ĐẾM ID TIN NHẮN VÀ TRA CỨU REPLY TOÀN HỆ THỐNG ---
+        self.id_generator = MessageIdGenerator()
         self.msg_counter = 0
 
         # Gọi hàm cài đặt cấu hình ghi log ngay khi ServerCore được khởi tạo
@@ -303,191 +315,202 @@ class ServerCore:
                 break
 
     def handle_client(self, client_socket, client_address):
-        """Hàm chạy trên luồng riêng để lắng nghe và xử lý toàn bộ dữ liệu trao đổi với 1 Client cụ thể"""
+        """Hàm chạy trên luồng riêng để lắng nghe và xử lý toàn bộ dữ liệu trao đổi với 1 Client cụ thể (tích hợp ServerRouter)"""
         # Biến lưu trữ tên người dùng của Client này (khởi tạo mặc định ban đầu là None)
         current_username = None
         # Biến lưu trữ tên ảnh avatar của Client này (khởi tạo mặc định là default_avatar.png)
         current_avatar = "default_avatar.png"
-        # Bộ đệm chuỗi (buffer) để lưu trữ các mẩu byte nhận được và xử lý phân tách gói tin theo dấu '\n'
-        buffer = ""
+        
+        # Mỗi Client có 1 đối tượng ServerRouter riêng (dùng chung MessageIdGenerator của Server)
+        # để tách gói TCP bằng bytearray, kiểm tra UTF-8/JSON nghiêm ngặt và tra cứu reply_to_id
+        router = ServerRouter(id_generator=self.id_generator)
 
         try:
             # Vòng lặp nhận dữ liệu từ Client liên tục trong suốt thời gian kết nối
             while self.is_running:
-                # Đọc tối đa 1024 bytes dữ liệu từ kết nối socket của client
-                data = client_socket.recv(1024)
+                # Đọc tối đa 4096 bytes dữ liệu từ kết nối socket của client
+                data = client_socket.recv(4096)
 
                 # Nếu dữ liệu nhận về là rỗng (b''), nghĩa là Client đã chủ động ngắt kết nối
                 if not data:
                     self.logger.info(f"Client {client_address} ({current_username}) đã đóng kết nối.")
                     break  # Thoát khỏi vòng lặp nhận dữ liệu
 
-                # Giải mã dữ liệu byte nhận được thành chuỗi ký tự UTF-8 và cộng dồn vào bộ đệm buffer
-                buffer += data.decode('utf-8')
-
-                # Tiếp tục cắt và xử lý từng gói tin chừng nào trong bộ đệm còn chứa ký tự ngắt dòng '\n'
-                while "\n" in buffer:
-                    # Tách lấy 1 gói tin đầu tiên trước dấu '\n', phần còn lại giữ lại trong buffer
-                    packet_str, buffer = buffer.split("\n", 1)
-                    # Cắt bỏ khoảng trắng thừa ở hai đầu chuỗi dữ liệu
-                    packet_str = packet_str.strip()
-
-                    # Nếu gói tin rỗng thì bỏ qua không xử lý
-                    if not packet_str:
+                # Nạp dữ liệu vào ServerRouter để tách gói bằng bytearray và kiểm tra tính hợp lệ
+                for result in router.feed_data(data):
+                    if not result["ok"]:
+                        error_packet = result["error"]
+                        self.logger.warning(f"Gói tin lỗi từ {client_address}: {error_packet}")
+                        self.send_packet(client_socket, error_packet)
                         continue
 
-                    # Thử phân tích chuỗi ký tự vừa nhận thành Dictionary theo định dạng JSON
-                    try:
-                        message_dict = json.loads(packet_str)
-                    except json.JSONDecodeError:
-                        # Ghi log cảnh báo nếu gói tin nhận được không đúng định dạng JSON
-                        self.logger.warning(f"Gói tin không phải JSON từ {client_address}: {packet_str}")
-                        continue
-
-                    # Lấy loại gói tin (type) từ dictionary nhận được
+                    message_dict = result["message"]
                     msg_type = message_dict.get("type")
 
                     # =========================================================================
-                    # NHIỆM VỤ TUẦN 3: LƯU VÀ TRUYỀN THÔNG TIN AVATAR KHI CLIENT ĐĂNG NHẬP
+                    # XỬ LÝ ĐĂNG NHẬP (LOGIN): KIỂM TRA TÊN HỢP LỆ & CHẶN TRÙNG USERNAME
                     # =========================================================================
                     if msg_type == "login":
                         if current_username is not None:
-                            self.send_packet(client_socket, {"type": "error", "message": "Already logged in"})
+                            self.send_packet(client_socket, {
+                                "type": "login_ack",
+                                "status": "error",
+                                "error": {"code": "ALREADY_LOGGED_IN", "message": "Bạn đã đăng nhập rồi."}
+                            })
                             continue
 
-                        # 1. Trích xuất tên người dùng username từ gói login (nếu rỗng thì đặt tên tạm theo Port)
-                        current_username = message_dict.get("username", f"User_{client_address[1]}")
+                        # 1. Trích xuất và kiểm tra tính hợp lệ của username qua validate_username
+                        raw_username = message_dict.get("username", f"User_{client_address[1]}")
+                        valid_name, err = validate_username(raw_username)
+                        if err:
+                            self.send_packet(client_socket, {
+                                "type": "login_ack",
+                                "status": "error",
+                                "error": {"code": err[0], "message": err[1]}
+                            })
+                            continue
 
-                        # 2. Trích xuất thông tin ảnh avatar từ gói login (nếu rỗng thì gán ảnh mặc định default_avatar.png)
+                        # 2. Chặn trùng username (không phân biệt hoa thường)
+                        with self.lock:
+                            is_taken = any(
+                                info.get("username", "").casefold() == valid_name.casefold()
+                                for info in self.clients.values()
+                            )
+                        if is_taken:
+                            self.logger.warning(f"Từ chối đăng nhập từ {client_address}: Username '{valid_name}' đã tồn tại.")
+                            self.send_packet(client_socket, {
+                                "type": "login_ack",
+                                "status": "error",
+                                "error": {"code": "USERNAME_TAKEN", "message": f"Username '{valid_name}' đã có người sử dụng."}
+                            })
+                            continue
+
+                        current_username = valid_name
+
+                        # 3. Trích xuất thông tin ảnh avatar từ gói login
                         extracted_avatar = message_dict.get("avatar")
                         if extracted_avatar and str(extracted_avatar).strip():
-                            current_avatar = str(extracted_avatar).strip()  # Dùng avatar do Client gửi lên
+                            current_avatar = str(extracted_avatar).strip()
                         else:
-                            current_avatar = "default_avatar.png"  # Dùng avatar mặc định nếu không gửi kèm
+                            current_avatar = "default_avatar.png"
 
-                        # 3. LƯU THÔNG TIN AVATAR VÀO DICTIONARY self.clients (có khóa lock bảo vệ an toàn luồng)
+                        # 4. Lưu thông tin vào self.clients an toàn đa luồng
                         with self.lock:
                             self.clients[client_socket] = {
-                                "username": current_username,  # Lưu tên của client
-                                "avatar": current_avatar       # Lưu thông tin avatar của client
+                                "username": current_username,
+                                "avatar": current_avatar
                             }
 
-                        # Ghi nhận log thông báo client đăng nhập thành công kèm thông tin avatar đã lưu
                         self.logger.info(f"==> Client [{current_username}] đã đăng nhập với avatar: '{current_avatar}'.")
 
-                        # 4. GỬI PHẢN HỒI 'login_ack' VỀ CHO CHÍNH CLIENT VỪA ĐĂNG NHẬP:
-                        # Gói tin này xác nhận đăng nhập thành công, truyền lại avatar của chính user và danh sách user online kèm avatar
+                        # 5. Gửi login_ack về cho chính client vừa đăng nhập
                         login_ack_packet = {
-                            "type": "login_ack",  # Loại gói tin xác nhận đăng nhập
-                            "status": "success",  # Trạng thái đăng nhập thành công
-                            "username": current_username,  # Tên người dùng của client này
-                            "avatar": current_avatar,  # Truyền thông tin avatar đã lưu của client này
-                            "online_users": self.get_online_users()  # Truyền toàn bộ danh sách online kèm avatar
+                            "type": "login_ack",
+                            "status": "success",
+                            "username": current_username,
+                            "avatar": current_avatar,
+                            "online_users": self.get_online_users()
                         }
-                        # Gửi gói login_ack riêng cho client vừa đăng nhập
                         self.send_packet(client_socket, login_ack_packet)
-                        self.logger.info(f"Đã gửi gói 'login_ack' xác nhận kèm avatar về cho [{current_username}].")
 
-                        # 5. TRUYỀN THÔNG TIN AVATAR CỦA CLIENT MỚI TỚI CÁC CLIENT KHÁC:
-                        # (a) Gửi thông báo sự kiện user_join (báo người dùng mới vào phòng chat kèm avatar)
+                        # 6. Broadcast user_join và danh sách online mới nhất cho các client khác
                         user_join_packet = {
-                            "type": "user_join",  # Loại gói tin thông báo người dùng mới tham gia
-                            "username": current_username,  # Tên người dùng mới
-                            "avatar": current_avatar  # Avatar của người dùng mới
+                            "type": "user_join",
+                            "username": current_username,
+                            "avatar": current_avatar
                         }
-                        # Gửi thông báo user_join cho các client khác (loại trừ chính client vừa đăng nhập)
                         self.broadcast_packet(user_join_packet, exclude_socket=client_socket)
-
-                        # (b) Đồng thời cập nhật đồng bộ danh sách online mới nhất (chứa cả avatar) cho tất cả client khác
                         self.broadcast_online_list(exclude_socket=client_socket)
+                        continue
 
                     # =========================================================================
-                    # NHIỆM VỤ TUẦN 4: XỬ LÝ ĐIỀU HƯỚNG TIN NHẮN FORWARD (CHUYỂN TIẾP 1-1 HOẶC PHÒNG CHUNG)
+                    # BẮT BUỘC ĐĂNG NHẬP TRƯỚC KHI GỬI CÁC LOẠI TIN NHẮN KHÁC
                     # =========================================================================
-                    elif msg_type == "forward":
-                        # Gọi hàm chuyên biệt xử lý điều hướng tin nhắn Forward theo yêu cầu tuần 4
+                    if current_username is None:
+                        self.logger.warning(f"Client {client_address} gửi '{msg_type}' khi chưa đăng nhập.")
+                        self.send_packet(client_socket, {
+                            "type": "error",
+                            "error": {"code": "NOT_LOGGED_IN", "message": "Bạn phải đăng nhập (type=login) trước khi gửi tin nhắn."}
+                        })
+                        continue
+
+                    # =========================================================================
+                    # XỬ LÝ ĐIỀU HƯỚNG TIN NHẮN FORWARD (TUẦN 4)
+                    # =========================================================================
+                    if msg_type == "forward":
                         self.handle_forward_message(client_socket, current_username, current_avatar, message_dict)
 
-                    # Xử lý các gói tin tin nhắn thường và tin nhắn trả lời (reply)
+                    # =========================================================================
+                    # XỬ LÝ TIN NHẮN THƯỜNG (MSG) VÀ TIN NHẮN TRẢ LỜI (REPLY)
+                    # =========================================================================
                     elif msg_type in ("msg", "message", "reply"):
-                        # Tự động gán msg_id tăng dần cho tin nhắn
-                        with self.lock:
-                            self.msg_counter += 1
-                            message_dict["msg_id"] = self.msg_counter
-
-                        # Đảm bảo có thông tin người gửi và avatar
+                        # Bổ sung thông tin người gửi, avatar và timestamp
                         message_dict["sender"] = current_username
                         if "avatar" not in message_dict or not message_dict.get("avatar"):
                             message_dict["avatar"] = current_avatar
+                        if "timestamp" not in message_dict or not message_dict.get("timestamp"):
+                            message_dict["timestamp"] = str(datetime.datetime.now().strftime("%H:%M:%S"))
 
                         # Điều hướng theo người nhận (receiver)
                         msg_receiver = message_dict.get("receiver", "all")
                         if not msg_receiver or str(msg_receiver).strip().lower() == "all":
-                            # Gửi vào phòng chung
+                            message_dict["receiver"] = "all"
                             self.logger.info(f"Tin nhắn [{msg_type}] từ [{current_username}] -> Phòng chung: {message_dict.get('content', '')}")
                             self.broadcast_packet(message_dict, exclude_socket=client_socket)
                         else:
-                            # Gửi riêng 1-1
-                            target_sock = self.find_client_socket_by_username(str(msg_receiver).strip())
+                            target_user = str(msg_receiver).strip()
+                            target_sock = self.find_client_socket_by_username(target_user)
                             if target_sock:
-                                self.logger.info(f"Tin nhắn [{msg_type}] từ [{current_username}] -> Riêng [{msg_receiver}]: {message_dict.get('content', '')}")
+                                self.logger.info(f"Tin nhắn [{msg_type}] từ [{current_username}] -> Riêng [{target_user}]: {message_dict.get('content', '')}")
                                 self.send_packet(target_sock, message_dict)
                             else:
-                                self.logger.warning(f"Người nhận [{msg_receiver}] không online để nhận tin nhắn [{msg_type}].")
+                                self.logger.warning(f"Người nhận [{target_user}] không online.")
+                                self.send_packet(client_socket, {
+                                    "type": "error",
+                                    "error": {"code": "USER_OFFLINE", "message": f"Người dùng '{target_user}' hiện không online."}
+                                })
 
                     # Xử lý các loại thông điệp khác (ví dụ: ping, heartbeat...)
                     else:
                         self.logger.info(f"Nhận gói tin loại '{msg_type}' từ [{current_username}]: {message_dict}")
 
         except ConnectionResetError:
-            # Bắt lỗi khi Client bị đóng đột ngột (tắt máy, ngắt mạng, tắt ứng dụng đột ngột)
             self.logger.warning(f"Client {client_address} ({current_username}) bị ngắt kết nối đột ngột (Connection Reset)!")
         except Exception as e:
-            # Ghi nhận các ngoại lệ phát sinh khác trong quá trình giao tiếp với client
             self.logger.error(f"Lỗi phát sinh khi xử lý Client {client_address} ({current_username}): {e}")
         finally:
             # KHỐI DỌN DẸP TÀI NGUYÊN KHI CLIENT RỜI KHỎI SERVER:
             with self.lock:
-                # Xóa thông tin client này ra khỏi danh sách quản lý self.clients
                 if client_socket in self.clients:
                     del self.clients[client_socket]
 
-            # Đóng kết nối socket của client này một cách an toàn
             try:
                 client_socket.close()
             except Exception:
                 pass
 
-            # Ghi log thông báo đã dọn dẹp xong tài nguyên của client
             self.logger.info(f"Đã giải phóng tài nguyên của [{current_username}] ({client_address}).")
 
-            # Nếu Client đã từng đăng nhập trước đó thì thông báo cho các client còn lại
             if current_username:
-                # Gửi gói tin báo client này đã rời phòng (user_leave)
                 leave_packet = {
                     "type": "user_leave",
                     "username": current_username
                 }
                 self.broadcast_packet(leave_packet)
-                # Gửi lại danh sách người dùng online cập nhật mới nhất cho các client còn lại
                 self.broadcast_online_list()
 
     def stop(self):
         """Hàm tắt Server an toàn và đóng toàn bộ các kết nối socket đang hoạt động"""
-        # Đặt cờ trạng thái Server sang False để dừng các vòng lặp lắng nghe
         self.is_running = False
 
-        # Khóa lock và đóng tất cả kết nối socket của các client hiện có
         with self.lock:
             for sock in list(self.clients.keys()):
                 try:
                     sock.close()
                 except Exception:
                     pass
-            # Xóa rỗng toàn bộ dictionary quản lý clients
             self.clients.clear()
 
-        # Đóng socket chính của Server
         if self.server_socket:
             try:
                 self.server_socket.close()
@@ -498,19 +521,25 @@ class ServerCore:
 
 # Điểm bắt đầu thực thi chương trình khi chạy trực tiếp tệp server_core.py
 if __name__ == "__main__":
-    PORT = 5000  # Cổng mạng quy định thống nhất cho hệ thống Server
-    HOST = "127.0.0.1"  # Chạy thử nghiệm trên địa chỉ mạng nội bộ máy tính (localhost)
+    # Đọc HOST và PORT linh hoạt từ tham số dòng lệnh hoặc biến môi trường hoặc dùng mặc định
+    # Cú pháp chạy tùy biến: python server_core.py [HOST] [PORT]
+    default_host = "0.0.0.0"
+    default_port = 5000
 
-    # Khởi tạo đối tượng ServerCore
-    server = ServerCore(host=HOST, port=PORT)
+    host = sys.argv[1] if len(sys.argv) > 1 else default_host
+    try:
+        port = int(sys.argv[2]) if len(sys.argv) > 2 else default_port
+    except ValueError:
+        print(f"[CẢNH BÁO] Port '{sys.argv[2]}' không hợp lệ, dùng port mặc định {default_port}")
+        port = default_port
 
-    print("=== UDM_08 TCP SERVER CORE (TUẦN 4 - ĐIỀU HƯỚNG FORWARD 1-1 VÀ PHÒNG CHUNG) ===")
-    print("Server đang lắng nghe trên cổng 5000. Nhấn Ctrl + C để dừng Server.\n")
+    server = ServerCore(host=host, port=port)
+
+    print("=== UDM_08 TCP SERVER CORE ===")
+    print(f"Server đang lắng nghe trên {host}:{port}. Nhấn Ctrl + C để dừng Server.\n")
 
     try:
-        # Khởi chạy vòng lặp hoạt động của Server
         server.start()
     except KeyboardInterrupt:
-        # Bắt sự kiện người dùng nhấn tổ hợp phím Ctrl + C để tắt Server an toàn
         print("\nĐang tiến hành tắt Server an toàn...")
         server.stop()
