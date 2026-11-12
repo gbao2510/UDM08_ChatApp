@@ -41,19 +41,21 @@ class NetworkClient(QThread):
             return False
 
     def run(self):
-        """Luồng chạy ngầm liên tục lắng nghe dữ liệu từ Server"""
-        buffer = ""
+        """Luồng chạy ngầm liên tục lắng nghe dữ liệu từ Server (sử dụng bytearray buffer chống lỗi UTF-8/emoji bị cắt đôi)"""
+        buffer = bytearray()
         while self.is_running:
             try:
-                data = self.client_socket.recv(4096).decode('utf-8')
+                data = self.client_socket.recv(4096)
                 if not data:
                     break  # Server ngắt kết nối
 
-                buffer += data
+                buffer.extend(data)
                 
-                while "\n" in buffer:
-                    line, buffer = buffer.split("\n", 1)
-                    line = line.strip()
+                while b"\n" in buffer:
+                    newline_pos = buffer.find(b"\n")
+                    line_bytes = bytes(buffer[:newline_pos])
+                    del buffer[:newline_pos + 1]
+                    line = line_bytes.decode('utf-8', errors='replace').strip()
                     if line:
                         try:
                             json_data = json.loads(line)
@@ -128,24 +130,31 @@ class NetworkClient(QThread):
         }
         return self.send_data(payload)
 
-    def send_reply(self, reply_to_msg_id: int, content: str, target_room_or_user: str = "general",):
-        """Hàm gửi tin nhắn trả lời (Reply) một tin nhắn cụ thể theo msg_id."""
+    def send_reply(self, reply_to_id: int, content: str, receiver: str = "all"):
+        """Hàm gửi tin nhắn trả lời (Reply) một tin nhắn cụ thể theo reply_to_id."""
+        sender_name = self.username or ""
         payload = {
             "type": "reply",
-            "reply_to_msg_id": reply_to_msg_id,
+            "reply_to_id": reply_to_id,
+            "reply_to_msg_id": reply_to_id,
             "content": content,
-            "target": target_room_or_user,
+            "sender": sender_name,
+            "receiver": receiver,
+            "timestamp": datetime.datetime.now().strftime("%H:%M:%S")
         }
         self.send_data(payload)
 
-    def send_forward(self, original_msg_id: int, content: str, target_room_or_user: str, original_sender: str = "",):
+    def send_forward(self, original_msg_id: int, content: str, receiver: str = "all", original_sender: str = "",):
         """Hàm chuyển tiếp (Forward) một tin nhắn sang phòng/người dùng khác"""
+        sender_name = self.username or ""
         payload = {
             "type": "forward",
             "original_msg_id": original_msg_id,
             "content": content,
+            "sender": sender_name,
             "original_sender": original_sender,
-            "target": target_room_or_user,
+            "receiver": receiver,
+            "timestamp": datetime.datetime.now().strftime("%H:%M:%S")
         }
         self.send_data(payload)
 
