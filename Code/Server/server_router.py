@@ -548,7 +548,6 @@ class ServerCore:
                     current_username = self.process_message(
                         client_socket, client_address, result["message"], current_username
                     )
- 
 
         except ConnectionResetError:
             self.logger.warning(f"Client {client_address} ({current_username}) bị ngắt kết nối đột ngột!")

@@ -1,6 +1,5 @@
 import json
 import pytest
-from Code.Server.server_router import ServerRouter, encode_message
 from Code.Server.server_router import (
     MessageIdGenerator,
     ServerRouter,
@@ -285,7 +284,6 @@ def test_oversized_frame_is_reported_once_then_recovers():
     assert first[0]["error"]["error"]["code"] == "MESSAGE_TOO_LARGE"
     assert middle == []
     assert len(last) == 1  # phần đuôi không bị hiểu nhầm là gói JSON mới
-    assert last[0]["message"]["content"] == "😀"    assert last[0]["message"]["content"] == "😀"
     assert last[0]["message"]["content"] == "😀"
 
 
