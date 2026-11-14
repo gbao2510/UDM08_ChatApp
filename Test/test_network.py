@@ -30,7 +30,12 @@ if __name__ == "__main__":
     # Thực hiện kết nối tới Server
     print("[TEST] Đang kết nối tới Server...")
     if client.connect_to_server():
-        # Gửi thử 1 gói tin JSON sau khi kết nối thành công
+        # 1.Gửi thử 1 gói tin JSON sau khi kết nối thành công
         QTimer.singleShot(500, lambda: client.send_data({"type": "ping", "message": "Hello Server"}))
-
+        # 2.Gửi thử 1 Emoji qua hàm send_emoji
+        QTimer.singleShot(1000, lambda: client.send_emoji("🎉"))
+        # 3. Gửi thử tin nhắn Reply (trả lời cho msg_id = 1) (1.5s)
+        QTimer.singleShot(1500, lambda: client.send_reply(reply_to_msg_id=1, content="Trả lời cho tin nhắn số 1", target_room_or_user="general",),)
+        # 4. Gửi thử tin nhắn Forward (chuyển tiếp msg_id = 1 sang room2) (2.0s)
+        QTimer.singleShot(2000, lambda: client.send_forward( original_msg_id=1, content="Nội dung được chuyển tiếp", target_room_or_user="room2", original_sender="UserA",),)
     sys.exit(app.exec())

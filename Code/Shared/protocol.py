@@ -66,6 +66,7 @@ def encode_message(data_dict):
     Biến Dictionary thành chuỗi JSON, mã hóa UTF-8 (để gửi được Emoji).
     QUAN TRỌNG: Thêm ký tự '\n' ở cuối để làm mốc cắt gói tin.
     """
+    assert isinstance(data_dict, dict), "data_dict phải là kiểu dict (JSON object)"
     json_str = json.dumps(data_dict, ensure_ascii=False)
     # Thêm '\n' làm cọc tiêu phân cách giữa các gói tin liên tiếp
     return (json_str + "\n").encode('utf-8')

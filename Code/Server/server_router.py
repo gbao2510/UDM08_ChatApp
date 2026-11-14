@@ -234,14 +234,18 @@ class ServerRouter:
                 )
             }
  
-        # Neu la goi tin Reply, tim noi dung goc dua tren reply_to_id
+        # Neu la goi tin Reply, tim noi dung goc dua tren reply_to_id hoac reply_to_msg_id
         # TRUOC khi gan msg_id va luu thong diep hien tai.
         reply_result = None
-        if "reply_to_id" in message:
-            reply_result = self._resolve_reply(message["reply_to_id"])
+        reply_id = message.get("reply_to_id")
+        if reply_id is None:
+            reply_id = message.get("reply_to_msg_id")
+
+        if reply_id is not None:
+            reply_result = self._resolve_reply(reply_id)
             if not reply_result["ok"]:
                 return reply_result
- 
+
         # Server tự cấp msg_id (ghi đè nếu Client có gửi kèm) và lưu lại
         # để các Reply trong tương lai có thể tra cứu.
         self.id_generator.register(message)
