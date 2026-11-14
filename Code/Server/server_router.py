@@ -241,7 +241,7 @@ class ServerRouter:
         if reply_id is None:
             reply_id = message.get("reply_to_msg_id")
 
-        if reply_id is not None:
+        if "reply_to_id" in message or "reply_to_msg_id" in message:
             reply_result = self._resolve_reply(reply_id)
             if not reply_result["ok"]:
                 return reply_result
