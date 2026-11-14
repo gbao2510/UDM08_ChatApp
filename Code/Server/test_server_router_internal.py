@@ -1,6 +1,10 @@
 import json
 import pytest
-from Code.Server.server_router import ServerRouter, encode_message
+from Code.Server.server_router import (
+    MessageIdGenerator,
+    ServerRouter,
+    encode_message,
+)
 
 
 def test_parse_normal_message():
@@ -281,3 +285,211 @@ def test_oversized_frame_is_reported_once_then_recovers():
     assert middle == []
     assert len(last) == 1  # phần đuôi không bị hiểu nhầm là gói JSON mới
     assert last[0]["message"]["content"] == "😀"
+
+
+# ---------------------------------------------------------------
+# REPLY (tìm nội dung gốc dựa trên reply_to_id)
+# ---------------------------------------------------------------
+
+def json_line(obj):
+    return (
+        json.dumps(obj, ensure_ascii=False) + "\n"
+    ).encode("utf-8")
+
+
+def error_code(result):
+    return result["error"]["error"]["code"]
+
+
+def test_reply_finds_original_content():
+    router = ServerRouter()
+
+    router.feed_data(json_line({"type": "chat", "content": "Hello"}))
+    result = router.feed_data(
+        json_line({"type": "chat", "content": "Hi", "reply_to_id": 1})
+    )
+
+    assert len(result) == 1
+    assert result[0]["ok"] is True
+    message = result[0]["message"]
+    assert message["msg_id"] == 2
+    assert message["reply_to_id"] == 1
+    assert message["reply_to"]["msg_id"] == 1
+    assert message["reply_to"]["content"] == "Hello"
+
+
+def test_reply_to_unknown_id_is_rejected():
+    router = ServerRouter()
+
+    result = router.feed_data(
+        json_line({"content": "x", "reply_to_id": 99})
+    )
+
+    assert result[0]["ok"] is False
+    assert error_code(result[0]) == "REPLY_NOT_FOUND"
+
+
+def test_reply_to_unknown_id_does_not_consume_msg_id():
+    router = ServerRouter()
+
+    result = router.feed_data(
+        json_line({"content": "First"})
+        + json_line({"content": "x", "reply_to_id": 99})
+        + json_line({"content": "Second"})
+    )
+
+    assert result[0]["message"]["msg_id"] == 1
+    assert result[1]["ok"] is False
+    assert result[2]["message"]["msg_id"] == 2
+
+
+@pytest.mark.parametrize(
+    "bad_id", ['"1"', "1.5", "true", "false", "null", "[1]", "{}"]
+)
+def test_reply_to_id_must_be_integer(bad_id):
+    router = ServerRouter()
+    router.feed_data(json_line({"content": "Hello"}))
+
+    result = router.feed_data(
+        ('{"content":"x","reply_to_id":%s}\n' % bad_id).encode("utf-8")
+    )
+
+    assert result[0]["ok"] is False
+    assert error_code(result[0]) == "INVALID_REPLY_TO_ID"
+
+
+def test_reply_in_same_packet_as_original():
+    router = ServerRouter()
+
+    result = router.feed_data(
+        json_line({"content": "Goc"})
+        + json_line({"content": "Tra loi", "reply_to_id": 1})
+    )
+
+    assert result[1]["ok"] is True
+    assert result[1]["message"]["reply_to"]["content"] == "Goc"
+
+
+def test_reply_to_emoji_original():
+    router = ServerRouter()
+
+    router.feed_data(utf8_line(EMOJI_TEXT))
+    result = router.feed_data(
+        json_line({"content": "ok", "reply_to_id": 1})
+    )
+
+    assert result[0]["ok"] is True
+    assert result[0]["message"]["reply_to"]["content"] == EMOJI_TEXT
+
+
+def test_reply_split_across_tcp_packets():
+    router = ServerRouter()
+    router.feed_data(json_line({"content": "Hello"}))
+    raw = json_line({"content": "Hi", "reply_to_id": 1})
+
+    first = router.feed_data(raw[:10])
+    second = router.feed_data(raw[10:])
+
+    assert first == []
+    assert second[0]["message"]["reply_to"]["content"] == "Hello"
+
+
+def test_reply_to_failed_message_is_not_found():
+    router = ServerRouter()
+
+    router.feed_data(b'{"content":}\n')  # lỗi nên không có msg_id 1
+    result = router.feed_data(
+        json_line({"content": "x", "reply_to_id": 1})
+    )
+
+    assert result[0]["ok"] is False
+    assert error_code(result[0]) == "REPLY_NOT_FOUND"
+
+
+def test_reply_with_lone_surrogate_is_rejected_by_unicode_check():
+    router = ServerRouter()
+    router.feed_data(json_line({"content": "Hello"}))
+
+    result = router.feed_data(
+        b'{"content":"\\ud83d","reply_to_id":1}\n'
+    )
+
+    assert result[0]["ok"] is False
+    assert error_code(result[0]) == "INVALID_UNICODE"
+
+
+def test_client_cannot_choose_msg_id_in_reply():
+    router = ServerRouter()
+    router.feed_data(json_line({"content": "Hello"}))
+
+    result = router.feed_data(
+        json_line({"content": "Hi", "reply_to_id": 1, "msg_id": 999})
+    )
+
+    assert result[0]["message"]["msg_id"] == 2
+
+
+def test_reply_chain_resolves_each_level():
+    router = ServerRouter()
+
+    router.feed_data(json_line({"content": "A"}))
+    router.feed_data(json_line({"content": "B", "reply_to_id": 1}))
+    result = router.feed_data(
+        json_line({"content": "C", "reply_to_id": 2})
+    )
+
+    assert result[0]["message"]["msg_id"] == 3
+    assert result[0]["message"]["reply_to"]["msg_id"] == 2
+    assert result[0]["message"]["reply_to"]["content"] == "B"
+
+
+def test_reply_across_clients_with_shared_id_generator():
+    shared = MessageIdGenerator()
+    alice = ServerRouter(id_generator=shared)
+    bob = ServerRouter(id_generator=shared)
+
+    alice.feed_data(json_line({"content": "Tu Alice"}))
+    result = bob.feed_data(
+        json_line({"content": "Tu Bob", "reply_to_id": 1})
+    )
+
+    assert result[0]["ok"] is True
+    assert result[0]["message"]["msg_id"] == 2
+    assert result[0]["message"]["reply_to"]["content"] == "Tu Alice"
+
+
+def test_reply_not_found_with_separate_id_generators():
+    alice = ServerRouter()
+    bob = ServerRouter()
+
+    alice.feed_data(json_line({"content": "Tu Alice"}))
+    result = bob.feed_data(
+        json_line({"content": "Tu Bob", "reply_to_id": 1})
+    )
+
+    assert error_code(result[0]) == "REPLY_NOT_FOUND"
+
+
+def test_reply_message_is_encodable():
+    router = ServerRouter()
+    router.feed_data(utf8_line(EMOJI_TEXT))
+    message = router.feed_data(
+        json_line({"content": "ok", "reply_to_id": 1})
+    )[0]["message"]
+
+    echoed = json.loads(encode_message(message).decode("utf-8"))
+
+    assert echoed["reply_to"]["content"] == EMOJI_TEXT
+    assert echoed["msg_id"] == 2
+
+
+def test_message_id_generator_register_and_lookup():
+    gen = MessageIdGenerator()
+    message = {"content": "A"}
+
+    msg_id = gen.register(message)
+
+    assert msg_id == 1
+    assert message["msg_id"] == 1
+    assert gen.get_message(1)["content"] == "A"
+    assert gen.get_message(2) is None
