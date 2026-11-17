@@ -211,24 +211,31 @@ class NetworkClient(QThread):
         }
         return self.send_data(payload)
 
-    def send_reply(self, reply_to_msg_id: int, content: str, target_room_or_user: str = "general",):
-        """Hàm gửi tin nhắn trả lời (Reply) một tin nhắn cụ thể theo msg_id."""
+    def send_reply(self, reply_to_id: int, content: str, receiver: str = "all"):
+        """Hàm gửi tin nhắn trả lời (Reply) một tin nhắn cụ thể theo reply_to_id."""
+        sender_name = self.username or ""
         payload = {
             "type": "reply",
-            "reply_to_msg_id": reply_to_msg_id,
+            "reply_to_id": reply_to_id,
+            "reply_to_msg_id": reply_to_id,
             "content": content,
-            "target": target_room_or_user,
+            "sender": sender_name,
+            "receiver": receiver,
+            "timestamp": datetime.datetime.now().strftime("%H:%M:%S")
         }
         self.send_data(payload)
 
-    def send_forward(self, original_msg_id: int, content: str, target_room_or_user: str, original_sender: str = "",):
+    def send_forward(self, original_msg_id: int, content: str, receiver: str = "all", original_sender: str = "",):
         """Hàm chuyển tiếp (Forward) một tin nhắn sang phòng/người dùng khác"""
+        sender_name = self.username or ""
         payload = {
             "type": "forward",
             "original_msg_id": original_msg_id,
             "content": content,
+            "sender": sender_name,
             "original_sender": original_sender,
-            "target": target_room_or_user,
+            "receiver": receiver,
+            "timestamp": datetime.datetime.now().strftime("%H:%M:%S")
         }
         self.send_data(payload)
 

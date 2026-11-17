@@ -47,10 +47,12 @@ class MainWindow(QMainWindow):
         # Trạng thái Reply hiện tại và danh sách user online để tái sử dụng cho menu hành động
         self.replying_to = None
         self.online_users_cache = []
+        self.my_avatar = "avatar_user1.png"
 
-        # Cài đặt giao diện & Mock data ban đầu
+        # Cài đặt giao diện
         self.setup_ui()
-        self.load_initial_data()
+        # Bỏ nạp mock data lúc khởi động để kết nối dữ liệu thật từ Server
+        self.lbl_online.setText("Online Users (0)")
 
         # Khởi tạo các module liên kết
         self.emoji_dialog = EmojiPickerDialog(parent_input_field=self.txt_message) if EmojiPickerDialog else None
@@ -400,11 +402,19 @@ class MainWindow(QMainWindow):
         - Chấm trạng thái xanh/xám overlay lên góc avatar
         - Tên người dùng
         """
-        # Đường dẫn ảnh mặc định nếu user chưa có avatar
+        # Đường dẫn ảnh đại diện: ghép với thư mục assets/ nếu là tên file tương đối
         default_avatar = os.path.join(current_dir, "assets", "default_avatar.png")
-        used_path = avatar_path if (avatar_path and os.path.exists(avatar_path)) else default_avatar
+        used_path = default_avatar
+        if avatar_path:
+            if os.path.isabs(avatar_path) and os.path.exists(avatar_path):
+                used_path = avatar_path
+            else:
+                assets_candidate = os.path.join(current_dir, "assets", os.path.basename(avatar_path))
+                if os.path.exists(assets_candidate):
+                    used_path = assets_candidate
 
         row = QWidget()
+        row.setProperty("username", name)
         row.setFixedHeight(58)
         row.setStyleSheet("""
             QWidget {
@@ -515,11 +525,16 @@ class MainWindow(QMainWindow):
         if not username:
             return
 
-        # Kiểm tra trùng tên
+        # Kiểm tra trùng tên an toàn qua property và QLabel con
         for i in range(self.sidebar_content_layout.count()):
             w = self.sidebar_content_layout.itemAt(i).widget()
-            if w and username in w.findChild(QLabel).text():
-                return
+            if w:
+                if w.property("username") == username:
+                    return
+                for lbl in w.findChildren(QLabel):
+                    lbl_text = lbl.text() or ""
+                    if username in lbl_text:
+                        return
 
         if username not in self.online_users_cache:
             self.online_users_cache.append(username)
@@ -537,8 +552,14 @@ class MainWindow(QMainWindow):
         for i in range(self.sidebar_content_layout.count()):
             w = self.sidebar_content_layout.itemAt(i).widget()
             if w:
-                lbl = w.findChild(QLabel)
-                if lbl and username in lbl.text():
+                matched = (w.property("username") == username)
+                if not matched:
+                    for lbl in w.findChildren(QLabel):
+                        lbl_text = lbl.text() or ""
+                        if username in lbl_text:
+                            matched = True
+                            break
+                if matched:
                     item = self.sidebar_content_layout.takeAt(i)
                     if item.widget():
                         item.widget().deleteLater()
@@ -607,10 +628,25 @@ class MainWindow(QMainWindow):
     # =========================================================================
     # CÁC HÀM XỬ LÝ TIN NHẮN (TÍCH HỢP MESSAGEITEM TỪ GUI_WIDGETS.PY)
     # =========================================================================
-    def add_message_to_chat(self, sender: str, message: str, is_self: bool = False, msg_id=None):
-        """Thêm bong bóng tin nhắn Messenger (MessageItem) từ gui_widgets.py vào khung chat"""
+    def add_message_to_chat(self, sender: str, message: str, is_self: bool = False, msg_id=None, avatar_path=None, reply_to=None):
+        """Thêm bong bóng tin nhắn Messenger (MessageItem) từ gui_widgets.py vào khung chat (hỗ trợ avatar và reply_to)"""
+        resolved_avatar = None
+        if avatar_path:
+            if os.path.isabs(avatar_path) and os.path.exists(avatar_path):
+                resolved_avatar = avatar_path
+            else:
+                candidate = os.path.join(current_dir, "assets", os.path.basename(avatar_path))
+                if os.path.exists(candidate):
+                    resolved_avatar = candidate
+
         if MessageItem:
-            widget_item = MessageItem(sender_name=sender, message=message, is_self=is_self)
+            widget_item = MessageItem(
+                sender_name=sender,
+                message=message,
+                is_self=is_self,
+                avatar_path=resolved_avatar,
+                reply_to=reply_to
+            )
         else:
             widget_item = QLabel(f"<b>{sender}</b>: {message}")
             widget_item.setWordWrap(True)
@@ -668,16 +704,17 @@ class MainWindow(QMainWindow):
             return
 
         my_name = self.txt_username.text().strip() or "Gia Bảo"
+        my_avatar = getattr(self, "my_avatar", "default_avatar.png")
         reply_info = self.replying_to
 
-        if reply_info:
-            reply_sender = reply_info.get("sender", "Ẩn danh")
-            display_msg = f"↩️ Trả lời {reply_sender}: {text}"
-        else:
-            display_msg = text
-
-        # Hiển thị tin nhắn của chính mình lên khung chat
-        self.add_message_to_chat(sender=my_name, message=display_msg, is_self=True)
+        # Hiển thị tin nhắn của chính mình lên khung chat (kèm ô trích dẫn reply nếu có)
+        self.add_message_to_chat(
+            sender=my_name,
+            message=text,
+            is_self=True,
+            avatar_path=my_avatar,
+            reply_to=reply_info
+        )
 
         # Xóa ô nhập và reset chiều cao nếu là AutoResizingTextEdit
         self.txt_message.clear()
@@ -697,6 +734,7 @@ class MainWindow(QMainWindow):
                     "receiver": "all",
                     "content": text,
                     "reply_to": reply_info,
+                    "reply_to_id": reply_info.get("msg_id") or 0,
                     "reply_to_msg_id": reply_info.get("msg_id") or 0,
                 }
             else:
@@ -751,7 +789,7 @@ class MainWindow(QMainWindow):
         self.network_client.connect_to_server(ip, port)
 
     def on_connected(self):
-        """Xử lý khi kết nối thành công: Gửi gói login báo tên mình lên Server"""
+        """Xử lý khi kết nối thành công: Gửi gói login báo tên và avatar của mình lên Server"""
         self.lbl_status.setText("Trạng thái: Đã kết nối Server")
         self.lbl_status.setStyleSheet("border: none; color: #40c057; font-weight: bold; font-size: 13px;")
         self.btn_connect.setEnabled(False)
@@ -759,11 +797,13 @@ class MainWindow(QMainWindow):
         self.txt_ip.setEnabled(False)
         self.txt_port.setEnabled(False)
 
-        # Gửi thông điệp login kèm username để Server đồng bộ danh sách online (Tuần 2)
+        # Gửi thông điệp login kèm username và avatar để Server đồng bộ danh sách online (Tuần 2 & 3)
         my_name = self.txt_username.text().strip()
+        my_avatar = getattr(self, "my_avatar", "default_avatar.png")
         login_packet = {
             "type": "login",
-            "username": my_name
+            "username": my_name,
+            "avatar": my_avatar
         }
         self.network_client.send_data(login_packet)
 
@@ -801,7 +841,8 @@ class MainWindow(QMainWindow):
         BẮT TẤT CẢ SIGNAL TỪ NETWORK_WORKER:
         - Đồng bộ danh sách online lên Sidebar (Nhiệm vụ chính Tuần 2)
         - Thêm/Xóa user khi có sự kiện join/leave
-        - Hiển thị tin nhắn chat qua MessageItem
+        - Lọc forward_ack và error để hiển thị thông báo hệ thống thay vì vẽ bong bóng Server
+        - Hiển thị tin nhắn chat qua MessageItem (kèm trích dẫn reply và avatar)
         """
         if not isinstance(data, dict):
             return
@@ -831,16 +872,37 @@ class MainWindow(QMainWindow):
                 self.add_system_message(f"{left_user} đã rời phòng chat.")
             return
 
-        # 4. Bắt tin nhắn chat thông thường / reply / forward -> hiển thị qua bong bóng MessageItem
+        # 4. Lọc gói tin xác nhận chuyển tiếp (forward_ack)
+        if msg_type == "forward_ack":
+            status = data.get("status")
+            receiver = data.get("receiver", "phòng chung")
+            if status == "success":
+                self.add_system_message(f"Đã chuyển tiếp tin nhắn tới '{receiver}' thành công.")
+            else:
+                err_msg = data.get("message", "Chuyển tiếp thất bại.")
+                self.add_system_message(f"Lỗi chuyển tiếp: {err_msg}")
+            return
+
+        # 5. Lọc gói tin báo lỗi (error) từ server
+        if msg_type == "error":
+            err_data = data.get("error", {})
+            if isinstance(err_data, dict):
+                err_msg = err_data.get("message") or err_data.get("code") or "Lỗi từ máy chủ."
+            else:
+                err_msg = str(data.get("message") or err_data or "Lỗi từ máy chủ.")
+            self.add_system_message(f"Lỗi máy chủ: {err_msg}")
+            return
+
+        # 6. Bắt tin nhắn chat thông thường / reply / forward -> hiển thị qua bong bóng MessageItem
         sender = data.get("sender", "Server")
         content = data.get("content", str(data))
         msg_id = data.get("msg_id")
-        if msg_type == "reply" and isinstance(data.get("reply_to"), dict):
-            reply_sender = data["reply_to"].get("sender", "Ẩn danh")
-            content = f"↩️ Trả lời {reply_sender}: {content}"
-        elif msg_type == "forward":
+        avatar = data.get("avatar")
+        reply_to = data.get("reply_to")
+
+        if msg_type == "forward":
             orig_sender = data.get("original_sender", "")
-            if orig_sender:
+            if orig_sender and orig_sender != sender:
                 content = f"↗️ Chuyển tiếp từ {orig_sender}: {content}"
 
         my_name = self.txt_username.text().strip()
@@ -848,7 +910,14 @@ class MainWindow(QMainWindow):
         
         # Chỉ vẽ nếu tin nhắn không phải từ chính mình gửi lại (tránh bị lặp tin 2 lần)
         if not is_self:
-            self.add_message_to_chat(sender=sender, message=content, is_self=False, msg_id=msg_id)
+            self.add_message_to_chat(
+                sender=sender,
+                message=content,
+                is_self=False,
+                msg_id=msg_id,
+                avatar_path=avatar,
+                reply_to=reply_to
+            )
 
     def demo_emoji_click(self):
         """Mở Emoji Picker từ gui_actions.py"""
