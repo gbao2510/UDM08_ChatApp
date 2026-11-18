@@ -504,6 +504,7 @@ def test_message_id_generator_register_and_lookup():
     assert message["msg_id"] == 1
     assert gen.get_message(1)["content"] == "A"
     assert gen.get_message(2) is None    assert gen.get_message(2) is None
+    assert gen.get_message(2) is None
 
 
 
