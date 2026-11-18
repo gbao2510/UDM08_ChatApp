@@ -14,8 +14,19 @@ from PyQt6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QListWidget, QListWidgetItem,
     QFrame, QMessageBox, QScrollArea
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
+
+def load_stylesheet(filename: str = "style.css") -> str:
+    """Đọc và nạp nội dung file CSS/QSS riêng biệt từ thư mục Client"""
+    css_path = os.path.join(current_dir, filename)
+    if os.path.exists(css_path):
+        try:
+            with open(css_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except Exception as e:
+            print(f"[CSS Error] Không thể nạp file {filename}: {e}")
+    return ""
 
 # Liên kết module từ gui_actions.py, network_worker.py, gui_widgets.py
 try:
@@ -49,19 +60,49 @@ class MainWindow(QMainWindow):
         self.online_users_cache = []
         self.my_avatar = "avatar_user1.png"
 
-        # Cài đặt giao diện
+        # Cài đặt giao diện và nạp stylesheet từ file CSS riêng
         self.setup_ui()
-        # Bỏ nạp mock data lúc khởi động để kết nối dữ liệu thật từ Server
-        self.lbl_online.setText("Online Users (0)")
+        self.apply_stylesheet()
+        
+        # Nạp dữ liệu mẫu ban đầu (Mock Data) để hiển thị đầy đủ danh sách bạn bè, avatar và tin nhắn chat
+        self.load_initial_data()
 
         # Khởi tạo các module liên kết
         self.emoji_dialog = EmojiPickerDialog(parent_input_field=self.txt_message) if EmojiPickerDialog else None
         self.network_client = None
 
+    def apply_stylesheet(self):
+        """Nạp và kích hoạt style.css riêng cho cửa sổ chính"""
+        css = load_stylesheet("style.css")
+        if css:
+            self.setStyleSheet(css)
+
+    def _on_chat_scroll_range_changed(self, min_val, max_val):
+        """Tự động cuộn xuống đáy khi khung chat có thêm tin nhắn mới (mở rộng vùng cuộn)"""
+        self.scroll_chat.verticalScrollBar().setValue(max_val)
+
+    def scroll_to_bottom(self):
+        """
+        Nhiệm vụ: Tự cuộn xuống đáy khi có tin mới.
+        Dùng multi-stage QTimer để đảm bảo ngay cả khi tin nhắn dài/ảnh chưa render xong layout,
+        thanh cuộn vẫn đảm bảo 100% chạm đáy.
+        """
+        bar = self.scroll_chat.verticalScrollBar()
+        bar.setValue(bar.maximum())
+        QTimer.singleShot(10, lambda: bar.setValue(bar.maximum()))
+        QTimer.singleShot(50, lambda: bar.setValue(bar.maximum()))
+        QTimer.singleShot(120, lambda: bar.setValue(bar.maximum()))
+
+    def set_online_count(self, count):
+        """Hiển thị nhãn Online Users kèm huy hiệu số lượng màu xanh chuẩn theo Mockup"""
+        self.lbl_online.setText(
+            f'Online Users <span style="background-color: #3ca56c; color: #ffffff; border-radius: 9px; padding: 2px 7px; font-size: 11px; font-weight: bold;">{count}</span>'
+        )
+
     def setup_ui(self):
-        # Widget trung tâm - Dark Theme
+        # Widget trung tâm - Quản lý qua file style.css
         central_widget = QWidget()
-        central_widget.setStyleSheet("background-color: #18191a; color: #f2f3f5;")
+        central_widget.setObjectName("centralWidget")
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(14, 14, 14, 14)
@@ -69,102 +110,43 @@ class MainWindow(QMainWindow):
 
         # 1. KHU VỰC CẤU HÌNH MẠNG & USERNAME (TOP BAR)
         network_box = QFrame()
-        network_box.setStyleSheet("""
-            QFrame {
-                background-color: #242526;
-                border: 1px solid #393a3b;
-                border-radius: 8px;
-            }
-        """)
+        network_box.setObjectName("networkBox")
         network_layout = QHBoxLayout(network_box)
         network_layout.setContentsMargins(14, 10, 14, 10)
         network_layout.setSpacing(10)
 
         # Ô nhập tên tài khoản
         lbl_user = QLabel("User:")
-        lbl_user.setStyleSheet("border: none; font-weight: bold; color: #e4e6eb; font-size: 13px;")
+        lbl_user.setObjectName("lblTopBar")
         self.txt_username = QLineEdit("Gia Bảo")
+        self.txt_username.setObjectName("txtUsername")
         self.txt_username.setPlaceholderText("Tên bạn")
         self.txt_username.setFixedWidth(110)
-        self.txt_username.setStyleSheet("""
-            QLineEdit {
-                background-color: #3a3b3c;
-                color: #ffffff;
-                border: 1px solid #4e4f50;
-                border-radius: 6px;
-                padding: 6px 10px;
-                font-size: 13px;
-            }
-            QLineEdit:focus {
-                border: 1px solid #0084ff;
-            }
-        """)
 
         # Ô nhập IP
         lbl_ip = QLabel("Server IP:")
-        lbl_ip.setStyleSheet("border: none; font-weight: bold; color: #e4e6eb; font-size: 13px;")
+        lbl_ip.setObjectName("lblTopBar")
         self.txt_ip = QLineEdit("127.0.0.1")
+        self.txt_ip.setObjectName("txtIp")
         self.txt_ip.setPlaceholderText("VD: 127.0.0.1")
         self.txt_ip.setFixedWidth(120)
-        self.txt_ip.setStyleSheet("""
-            QLineEdit {
-                background-color: #3a3b3c;
-                color: #ffffff;
-                border: 1px solid #4e4f50;
-                border-radius: 6px;
-                padding: 6px 10px;
-                font-size: 13px;
-            }
-            QLineEdit:focus {
-                border: 1px solid #0084ff;
-            }
-        """)
 
         # Ô nhập Port
         lbl_port = QLabel("Port:")
-        lbl_port.setStyleSheet("border: none; font-weight: bold; color: #e4e6eb; font-size: 13px;")
+        lbl_port.setObjectName("lblTopBar")
         self.txt_port = QLineEdit("5000")
+        self.txt_port.setObjectName("txtPort")
         self.txt_port.setPlaceholderText("Port")
         self.txt_port.setFixedWidth(65)
-        self.txt_port.setStyleSheet("""
-            QLineEdit {
-                background-color: #3a3b3c;
-                color: #ffffff;
-                border: 1px solid #4e4f50;
-                border-radius: 6px;
-                padding: 6px 10px;
-                font-size: 13px;
-            }
-            QLineEdit:focus {
-                border: 1px solid #0084ff;
-            }
-        """)
 
         # Nút Kết nối
         self.btn_connect = QPushButton("Kết nối")
+        self.btn_connect.setObjectName("btnConnect")
         self.btn_connect.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_connect.setStyleSheet("""
-            QPushButton {
-                background-color: #0084ff;
-                color: white;
-                font-weight: bold;
-                padding: 6px 16px;
-                border-radius: 6px;
-                border: none;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background-color: #0073e6;
-            }
-            QPushButton:disabled {
-                background-color: #3a3b3c;
-                color: #8a8d91;
-            }
-        """)
         self.btn_connect.clicked.connect(self.demo_connect_action)
 
         self.lbl_status = QLabel("Trạng thái: Chưa kết nối")
-        self.lbl_status.setStyleSheet("border: none; color: #b0b3b8; font-style: italic; font-size: 13px;")
+        self.lbl_status.setObjectName("lblStatus")
 
         network_layout.addWidget(lbl_user)
         network_layout.addWidget(self.txt_username)
@@ -185,30 +167,17 @@ class MainWindow(QMainWindow):
         # 2.1 Sidebar: Danh sách người online với ẢNH ĐẠI DIỆN (CircularAvatar từ gui_widgets.py)
         sidebar_outer = QVBoxLayout()
         sidebar_outer.setSpacing(4)
-        self.lbl_online = QLabel("Online Users (0)")
-        self.lbl_online.setStyleSheet("color: #e4e6eb; font-weight: bold; font-size: 13px; margin-bottom: 2px;")
+        self.lbl_online = QLabel()
+        self.lbl_online.setObjectName("lblOnlineTitle")
+        self.set_online_count(0)
 
         # Dùng QScrollArea + Widget tùy chỉnh để hiển thị Avatar + Tên (không dùng QListWidget)
         self.sidebar_scroll = QScrollArea()
+        self.sidebar_scroll.setObjectName("sidebarScroll")
         self.sidebar_scroll.setWidgetResizable(True)
         self.sidebar_scroll.setFixedWidth(240)
-        self.sidebar_scroll.setStyleSheet("""
-            QScrollArea {
-                border: 1px solid #393a3b;
-                border-radius: 8px;
-                background-color: #242526;
-            }
-            QScrollBar:vertical {
-                width: 4px;
-                background: transparent;
-            }
-            QScrollBar::handle:vertical {
-                background: #4e4f50;
-                border-radius: 2px;
-            }
-        """)
         self.sidebar_content = QWidget()
-        self.sidebar_content.setStyleSheet("background-color: #242526;")
+        self.sidebar_content.setObjectName("sidebarContent")
         self.sidebar_content_layout = QVBoxLayout(self.sidebar_content)
         self.sidebar_content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.sidebar_content_layout.setContentsMargins(8, 8, 8, 8)
@@ -222,19 +191,16 @@ class MainWindow(QMainWindow):
         # 2.2 Chat Area: TÍCH HỢP MESSAGEITEM VÀ SCROLLAREA TỪ GUI_WIDGETS.PY
         chat_layout = QVBoxLayout()
         lbl_chat = QLabel("Phòng Chat Chung")
-        lbl_chat.setStyleSheet("color: #e4e6eb; font-weight: bold; font-size: 13px; margin-bottom: 2px;")
+        lbl_chat.setObjectName("lblChatTitle")
 
         self.scroll_chat = QScrollArea()
+        self.scroll_chat.setObjectName("chatScrollArea")
         self.scroll_chat.setWidgetResizable(True)
-        self.scroll_chat.setStyleSheet("""
-            QScrollArea {
-                border: 1px solid #393a3b;
-                border-radius: 8px;
-                background-color: #242526;
-            }
-        """)
+        # Tự động cuộn xuống đáy khi có tin nhắn mới làm thay đổi chiều cao nội dung chat
+        self.scroll_chat.verticalScrollBar().rangeChanged.connect(self._on_chat_scroll_range_changed)
+
         self.chat_container = QWidget()
-        self.chat_container.setStyleSheet("background-color: #242526;")
+        self.chat_container.setObjectName("chatContainer")
         self.chat_content_layout = QVBoxLayout(self.chat_container)
         self.chat_content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.chat_content_layout.setSpacing(6)
@@ -243,46 +209,21 @@ class MainWindow(QMainWindow):
         # Thanh trạng thái phụ trên khung chat: "Đang trả lời: [Tên]" kèm nút X hủy
         self.reply_bar = QFrame()
         self.reply_bar.setObjectName("replyStatusBar")
-        self.reply_bar.setStyleSheet("""
-            QFrame#replyStatusBar {
-                background-color: #242526;
-                border: 1px solid #393a3b;
-                border-left: 3px solid #0084ff;
-                border-radius: 6px;
-            }
-        """)
         reply_bar_layout = QHBoxLayout(self.reply_bar)
         reply_bar_layout.setContentsMargins(10, 6, 8, 6)
         reply_bar_layout.setSpacing(8)
 
         self.lbl_reply_status = QLabel("")
-        self.lbl_reply_status.setStyleSheet(
-            "border: none; color: #e4e6eb; font-size: 12px; font-weight: bold;"
-        )
+        self.lbl_reply_status.setObjectName("lblReplyStatus")
 
         self.lbl_reply_preview = QLabel("")
-        self.lbl_reply_preview.setStyleSheet(
-            "border: none; color: #b0b3b8; font-size: 12px; font-style: italic;"
-        )
+        self.lbl_reply_preview.setObjectName("lblReplyPreview")
 
         self.btn_cancel_reply = QPushButton("X")
+        self.btn_cancel_reply.setObjectName("btnCancelReply")
         self.btn_cancel_reply.setFixedSize(22, 22)
         self.btn_cancel_reply.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_cancel_reply.setToolTip("Hủy trả lời")
-        self.btn_cancel_reply.setStyleSheet("""
-            QPushButton {
-                background-color: #3a3b3c;
-                color: #e4e6eb;
-                font-weight: bold;
-                font-size: 11px;
-                border: none;
-                border-radius: 11px;
-            }
-            QPushButton:hover {
-                background-color: #fa5252;
-                color: #ffffff;
-            }
-        """)
         self.btn_cancel_reply.clicked.connect(self.cancel_reply)
 
         reply_bar_layout.addWidget(self.lbl_reply_status)
@@ -297,65 +238,73 @@ class MainWindow(QMainWindow):
 
         main_layout.addLayout(body_layout, stretch=1)
 
-        # 3. KHU VỰC NHẬP TIN NHẮN (TÍCH HỢP AUTORESIZINGTEXTEDIT TỪ GUI_WIDGETS.PY)
+        # 3. KHU VỰC NHẬP TIN NHẮN (THANH PILL BO TRÒN VÀ CÁC NÚT ICON THEO MOCKUP)
         bottom_layout = QHBoxLayout()
-        bottom_layout.setSpacing(8)
+        bottom_layout.setSpacing(10)
 
-        # Nút Emoji (liên kết với gui_actions.py)
-        self.btn_emoji = QPushButton("😊")
-        self.btn_emoji.setFixedSize(38, 38)
-        self.btn_emoji.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_emoji.setToolTip("Chọn Emoji (gui_actions.py)")
-        self.btn_emoji.setStyleSheet("""
-            QPushButton {
-                background-color: #3a3b3c;
-                color: white;
-                font-size: 18px;
-                border: 1px solid #4e4f50;
-                border-radius: 19px;
-            }
-            QPushButton:hover {
-                background-color: #4e4f50;
-            }
-        """)
-        self.btn_emoji.clicked.connect(self.demo_emoji_click)
+        # Nút tròn dấu (+) bên trái
+        self.btn_plus = QPushButton("+")
+        self.btn_plus.setObjectName("btnPlus")
+        self.btn_plus.setFixedSize(38, 38)
+        self.btn_plus.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_plus.setToolTip("Thêm tệp hoặc tính năng")
 
-        # Ô nhập tin nhắn tự co giãn (từ gui_widgets.py)
+        # Khung Pill tròn màu trắng chứa ô nhập và các biểu tượng
+        self.input_pill = QFrame()
+        self.input_pill.setObjectName("inputPill")
+        input_pill_layout = QHBoxLayout(self.input_pill)
+        input_pill_layout.setContentsMargins(14, 2, 8, 2)
+        input_pill_layout.setSpacing(6)
+
+        # Ô nhập tin nhắn
         if AutoResizingTextEdit:
-            self.txt_message = AutoResizingTextEdit(min_height=38, max_height=100)
-            # Khắc phục tính tương thích để gui_actions.py gọi .text() và .setText() không bị lỗi
+            self.txt_message = AutoResizingTextEdit(min_height=34, max_height=100)
+            self.txt_message.setObjectName("inputMessage")
+            self.txt_message.setStyleSheet("")  # Dùng style từ style.css
+            self.txt_message.setPlaceholderText("Nhập tin nhắn...")
             self.txt_message.text = self.txt_message.toPlainText
             self.txt_message.send_requested.connect(self.send_message)
         else:
             self.txt_message = QLineEdit()
+            self.txt_message.setObjectName("inputMessage")
             self.txt_message.setPlaceholderText("Nhập tin nhắn...")
-            self.txt_message.setFixedHeight(38)
+            self.txt_message.setFixedHeight(34)
             self.txt_message.returnPressed.connect(self.send_message)
 
-        # Nút Send phong cách Messenger (từ gui_widgets.py)
-        self.btn_send = QPushButton("Send")
-        self.btn_send.setFixedSize(65, 38)
+        # Các nút biểu tượng bên phải thanh pill (📎 Đính kèm, 😊 Emoji, 🎙️ Ghi âm)
+        self.btn_attach = QPushButton("📎")
+        self.btn_attach.setObjectName("btnAttach")
+        self.btn_attach.setFixedSize(28, 28)
+        self.btn_attach.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_attach.setToolTip("Đính kèm tệp")
+
+        self.btn_emoji = QPushButton("😊")
+        self.btn_emoji.setObjectName("btnEmoji")
+        self.btn_emoji.setFixedSize(28, 28)
+        self.btn_emoji.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_emoji.setToolTip("Chọn Emoji (gui_actions.py)")
+        self.btn_emoji.clicked.connect(self.demo_emoji_click)
+
+        self.btn_mic = QPushButton("🎙️")
+        self.btn_mic.setObjectName("btnMic")
+        self.btn_mic.setFixedSize(28, 28)
+        self.btn_mic.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_mic.setToolTip("Ghi âm giọng nói")
+
+        input_pill_layout.addWidget(self.txt_message, stretch=1)
+        input_pill_layout.addWidget(self.btn_attach)
+        input_pill_layout.addWidget(self.btn_emoji)
+        input_pill_layout.addWidget(self.btn_mic)
+
+        # Nút Send phong cách Gradient xanh biển theo Mockup
+        self.btn_send = QPushButton("✈  Send")
+        self.btn_send.setObjectName("btnSend")
+        self.btn_send.setFixedHeight(38)
         self.btn_send.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_send.setStyleSheet("""
-            QPushButton {
-                background-color: #0084FF;
-                color: white;
-                font-weight: bold;
-                border-radius: 19px;
-                font-size: 14px;
-                border: none;
-            }
-            QPushButton:hover {
-                background-color: #0073E6;
-            }
-            QPushButton:pressed {
-                background-color: #005BB5;
-            }
-        """)
         self.btn_send.clicked.connect(self.send_message)
 
-        bottom_layout.addWidget(self.btn_emoji, alignment=Qt.AlignmentFlag.AlignBottom)
-        bottom_layout.addWidget(self.txt_message, stretch=1)
+        bottom_layout.addWidget(self.btn_plus, alignment=Qt.AlignmentFlag.AlignBottom)
+        bottom_layout.addWidget(self.input_pill, stretch=1)
         bottom_layout.addWidget(self.btn_send, alignment=Qt.AlignmentFlag.AlignBottom)
 
         main_layout.addLayout(bottom_layout)
@@ -376,7 +325,7 @@ class MainWindow(QMainWindow):
         for u in mock_users:
             row = self._make_user_row(name=u["name"], is_online=u["online"])
             self.sidebar_content_layout.addWidget(row)
-        self.lbl_online.setText(f"Online Users ({len(mock_users)})")
+        self.set_online_count(len(mock_users))
 
         # 2. Nạp bong bóng tin nhắn mẫu chuẩn từ gui_widgets.py
         mock_messages = [
@@ -414,17 +363,10 @@ class MainWindow(QMainWindow):
                     used_path = assets_candidate
 
         row = QWidget()
+        row.setObjectName("userRow")
         row.setProperty("username", name)
         row.setFixedHeight(58)
-        row.setStyleSheet("""
-            QWidget {
-                background-color: transparent;
-                border-radius: 8px;
-            }
-            QWidget:hover {
-                background-color: #3a3b3c;
-            }
-        """)
+        row.setCursor(Qt.CursorShape.PointingHandCursor)
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(8, 6, 8, 6)
         row_layout.setSpacing(10)
@@ -441,22 +383,19 @@ class MainWindow(QMainWindow):
             avatar = QLabel("👤")
             avatar.setFixedSize(38, 38)
             avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            avatar.setStyleSheet("font-size: 22px;")
 
         avatar_frame_layout.addWidget(avatar)
 
         # Chấm trạng thái online/offline (QLabel nhỏ đè lên góc phải-dưới)
         dot = QLabel()
+        dot.setObjectName("dotOnline" if is_online else "dotOffline")
         dot.setFixedSize(12, 12)
         dot.setParent(avatar_frame)
         dot.move(28, 28)          # Góc dưới bên phải của avatar 38px
-        dot.setStyleSheet(f"""
-            QLabel {{
-                background-color: {'#31a24c' if is_online else '#b0b3b8'};
-                border-radius: 6px;
-                border: 2px solid #242526;
-            }}
-        """)
+        # Dự phòng fallback màu chấm viền trắng
+        dot.setStyleSheet(
+            f"background-color: {'#10b981' if is_online else '#94a3b8'}; border-radius: 6px; border: 2px solid #ffffff;"
+        )
         dot.raise_()
 
         row_layout.addWidget(avatar_frame)
@@ -469,17 +408,16 @@ class MainWindow(QMainWindow):
         display_name = f"{name} (Bạn)" if name == my_name else name
 
         lbl_name = QLabel(display_name)
-        lbl_name.setStyleSheet(f"""
-            color: {'#e4e6eb' if is_online else '#8a8d91'};
-            font-size: 13px;
-            font-weight: {'bold' if name == my_name else 'normal'};
-        """)
+        lbl_name.setObjectName("userNameSelf" if name == my_name else "userName")
 
         lbl_status_txt = QLabel("Online" if is_online else "Offline")
-        lbl_status_txt.setStyleSheet(f"""
-            color: {'#31a24c' if is_online else '#8a8d91'};
-            font-size: 11px;
-        """)
+        lbl_status_txt.setObjectName("userStatus" if is_online else "userStatusOffline")
+
+        text_layout.addWidget(lbl_name)
+        text_layout.addWidget(lbl_status_txt)
+        row_layout.addLayout(text_layout, stretch=1)
+
+        return row
 
         text_layout.addWidget(lbl_name)
         text_layout.addWidget(lbl_status_txt)
@@ -518,7 +456,7 @@ class MainWindow(QMainWindow):
             self.sidebar_content_layout.addWidget(row)
 
         count = self.sidebar_content_layout.count()
-        self.lbl_online.setText(f"Online Users ({count})")
+        self.set_online_count(count)
 
     def add_online_user(self, username, avatar_path=None):
         """Thêm 1 người dùng mới online vào sidebar"""
@@ -541,7 +479,7 @@ class MainWindow(QMainWindow):
         row = self._make_user_row(name=username, is_online=True, avatar_path=avatar_path)
         self.sidebar_content_layout.addWidget(row)
         count = self.sidebar_content_layout.count()
-        self.lbl_online.setText(f"Online Users ({count})")
+        self.set_online_count(count)
 
     def remove_online_user(self, username):
         """Xóa 1 người dùng vừa rời mạng khỏi sidebar"""
@@ -565,7 +503,7 @@ class MainWindow(QMainWindow):
                         item.widget().deleteLater()
                     break
         count = self.sidebar_content_layout.count()
-        self.lbl_online.setText(f"Online Users ({count})")
+        self.set_online_count(count)
 
     def get_online_usernames(self):
         """Trả về danh sách tên người dùng online hiện tại cho ForwardDialog"""
@@ -647,18 +585,15 @@ class MainWindow(QMainWindow):
                 avatar_path=resolved_avatar,
                 reply_to=reply_to
             )
+            # Xóa stylesheet cục bộ để nhận màu từ file style.css
+            if hasattr(widget_item, "lbl_msg"):
+                widget_item.lbl_msg.setStyleSheet("")
+            if hasattr(widget_item, "btn_reply"):
+                widget_item.btn_reply.setStyleSheet("")
         else:
             widget_item = QLabel(f"<b>{sender}</b>: {message}")
+            widget_item.setObjectName("fallbackMessage")
             widget_item.setWordWrap(True)
-            widget_item.setStyleSheet("""
-                QLabel {
-                    background-color: #3a3b3c;
-                    color: #ffffff;
-                    border-radius: 12px;
-                    padding: 8px 12px;
-                    font-size: 13px;
-                }
-            """)
 
         self.chat_content_layout.addWidget(widget_item)
 
@@ -676,22 +611,18 @@ class MainWindow(QMainWindow):
                 on_forward_confirmed=self.handle_forward_confirmed,
             )
 
-        # Cuộn thanh cuộn xuống tin nhắn mới nhất
-        QApplication.processEvents()
-        self.scroll_chat.verticalScrollBar().setValue(
-            self.scroll_chat.verticalScrollBar().maximum()
-        )
+        # Tự động cuộn xuống đáy khi có tin nhắn mới (kết hợp multi-stage timer)
+        self.scroll_to_bottom()
 
     def add_system_message(self, text: str):
         """Hiển thị thông báo hệ thống"""
         lbl = QLabel(f"📢 {text}")
+        lbl.setObjectName("lblSystemMessage")
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl.setStyleSheet("color: #b0b3b8; font-style: italic; font-size: 12px; padding: 4px;")
         self.chat_content_layout.addWidget(lbl)
-        QApplication.processEvents()
-        self.scroll_chat.verticalScrollBar().setValue(
-            self.scroll_chat.verticalScrollBar().maximum()
-        )
+        
+        # Tự động cuộn xuống tin nhắn mới nhất
+        self.scroll_to_bottom()
 
     def send_message(self):
         """Gửi tin nhắn đi (hỗ trợ cả tin nhắn thường và Reply)"""
@@ -790,6 +721,7 @@ class MainWindow(QMainWindow):
 
     def on_connected(self):
         """Xử lý khi kết nối thành công: Gửi gói login báo tên và avatar của mình lên Server"""
+        self._clear_sidebar()
         self.lbl_status.setText("Trạng thái: Đã kết nối Server")
         self.lbl_status.setStyleSheet("border: none; color: #40c057; font-weight: bold; font-size: 13px;")
         self.btn_connect.setEnabled(False)
@@ -824,7 +756,7 @@ class MainWindow(QMainWindow):
                 # Tìm chấm trạng thái (dot) và đổi sang màu xám
                 for dot in w.findChildren(QLabel):
                     if dot.width() == 12 and dot.height() == 12:
-                        dot.setStyleSheet("background-color: #b0b3b8; border-radius: 6px; border: 2px solid #242526;")
+                        dot.setStyleSheet("background-color: #94a3b8; border-radius: 6px; border: 2px solid #ffffff;")
 
     def on_network_error(self, err_msg):
         """Xử lý khi gặp lỗi mạng"""
@@ -935,6 +867,12 @@ class MainWindow(QMainWindow):
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
+    
+    # Nạp toàn bộ giao diện từ file CSS riêng biệt
+    css_content = load_stylesheet("style.css")
+    if css_content:
+        app.setStyleSheet(css_content)
+        
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
