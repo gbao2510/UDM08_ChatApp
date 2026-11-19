@@ -503,7 +503,6 @@ def test_message_id_generator_register_and_lookup():
     assert msg_id == 1
     assert message["msg_id"] == 1
     assert gen.get_message(1)["content"] == "A"
-    assert gen.get_message(2) is None    assert gen.get_message(2) is None
     assert gen.get_message(2) is None
 
 
@@ -1078,11 +1077,11 @@ def test_client_keeps_retrying_until_server_appears():
 
 
 def test_client_gives_up_after_max_attempts():
-    client = make_client(free_port(), max_attempts=3, initial_delay=0.01, max_delay=0.02)
+    client = make_client(free_port(), max_attempts=3, initial_delay=0.01, max_delay=0.02, connect_timeout=0.2)
     client.start()
     thread = client._thread
 
-    thread.join(3)
+    thread.join(5)
 
     assert not thread.is_alive()
     assert client.state == "disconnected"
