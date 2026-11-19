@@ -51,7 +51,7 @@ except Exception:
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Chat Application - Team Client (Tuần 2: Quản lý Online & Ghép Widgets)")
+        self.setWindowTitle("Chat Application ")
         self.resize(920, 650)
         self.setMinimumSize(780, 520)
 
@@ -99,6 +99,25 @@ class MainWindow(QMainWindow):
             f'Online Users <span style="background-color: #3ca56c; color: #ffffff; border-radius: 9px; padding: 2px 7px; font-size: 11px; font-weight: bold;">{count}</span>'
         )
 
+    def toggle_network_bar(self):
+        """Ẩn hoặc hiện thanh thông tin User / IP / Port / Kết nối"""
+        is_visible = self.network_box.isVisible()
+        self.network_box.setVisible(not is_visible)
+        self.btn_show_network.setVisible(is_visible)
+        self.update_collapsed_network_text()
+
+    def update_collapsed_network_text(self):
+        """Cập nhật nội dung vắn tắt trên nút mở rộng khi thanh kết nối bị ẩn"""
+        user = self.txt_username.text().strip() if hasattr(self, 'txt_username') else "Gia Bảo"
+        ip = self.txt_ip.text().strip() if hasattr(self, 'txt_ip') else "127.0.0.1"
+        port = self.txt_port.text().strip() if hasattr(self, 'txt_port') else "5000"
+        
+        is_connected = bool(self.network_client and self.network_client.is_running)
+        if is_connected:
+            self.btn_show_network.setText(f"🟢 Đã kết nối: {ip}:{port} • {user} ▼")
+        else:
+            self.btn_show_network.setText(f"⚙️ Cài đặt kết nối: {ip}:{port} • {user} ▼")
+
     def setup_ui(self):
         # Widget trung tâm - Quản lý qua file style.css
         central_widget = QWidget()
@@ -108,10 +127,18 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(14, 14, 14, 14)
         main_layout.setSpacing(12)
 
-        # 1. KHU VỰC CẤU HÌNH MẠNG & USERNAME (TOP BAR)
-        network_box = QFrame()
-        network_box.setObjectName("networkBox")
-        network_layout = QHBoxLayout(network_box)
+        # 1. KHU VỰC CẤU HÌNH MẠNG & USERNAME (TOP BAR - CÓ THỂ BẤM ẨN/HIỆN)
+        # Nút mở lại thanh kết nối (hiển thị khi thanh kết nối đang bị ẩn)
+        self.btn_show_network = QPushButton("⚙️ Cài đặt kết nối: 127.0.0.1:5000 • Gia Bảo ▼")
+        self.btn_show_network.setObjectName("btnShowNetwork")
+        self.btn_show_network.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_show_network.setToolTip("Bấm để hiển thị lại thanh cấu hình IP / Port / User")
+        self.btn_show_network.clicked.connect(self.toggle_network_bar)
+        self.btn_show_network.hide()
+
+        self.network_box = QFrame()
+        self.network_box.setObjectName("networkBox")
+        network_layout = QHBoxLayout(self.network_box)
         network_layout.setContentsMargins(14, 10, 14, 10)
         network_layout.setSpacing(10)
 
@@ -148,6 +175,13 @@ class MainWindow(QMainWindow):
         self.lbl_status = QLabel("Trạng thái: Chưa kết nối")
         self.lbl_status.setObjectName("lblStatus")
 
+        # Nút bấm để ẩn thanh kết nối
+        self.btn_hide_network = QPushButton("▲ Ẩn")
+        self.btn_hide_network.setObjectName("btnHideNetwork")
+        self.btn_hide_network.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_hide_network.setToolTip("Ẩn thanh thông tin kết nối để mở rộng khung chat")
+        self.btn_hide_network.clicked.connect(self.toggle_network_bar)
+
         network_layout.addWidget(lbl_user)
         network_layout.addWidget(self.txt_username)
         network_layout.addWidget(lbl_ip)
@@ -157,8 +191,10 @@ class MainWindow(QMainWindow):
         network_layout.addWidget(self.btn_connect)
         network_layout.addWidget(self.lbl_status)
         network_layout.addStretch()
+        network_layout.addWidget(self.btn_hide_network)
 
-        main_layout.addWidget(network_box)
+        main_layout.addWidget(self.btn_show_network, alignment=Qt.AlignmentFlag.AlignHCenter)
+        main_layout.addWidget(self.network_box)
 
         # 2. KHU VỰC THÂN CHÍNH (SIDEBAR + KHUNG CHAT)
         body_layout = QHBoxLayout()
@@ -728,6 +764,7 @@ class MainWindow(QMainWindow):
         self.txt_username.setEnabled(False)
         self.txt_ip.setEnabled(False)
         self.txt_port.setEnabled(False)
+        self.update_collapsed_network_text()
 
         # Gửi thông điệp login kèm username và avatar để Server đồng bộ danh sách online (Tuần 2 & 3)
         my_name = self.txt_username.text().strip()
@@ -747,6 +784,7 @@ class MainWindow(QMainWindow):
         self.txt_username.setEnabled(True)
         self.txt_ip.setEnabled(True)
         self.txt_port.setEnabled(True)
+        self.update_collapsed_network_text()
 
         # Đổi tất cả người dùng sang trạng thái offline khi mất kết nối
         self.lbl_online.setText("Online Users (Đã ngắt kết nối)")
