@@ -395,7 +395,7 @@ Giao diện đầy đủ sẽ hiện ra. Có thể dùng mà không kết nối 
 
 ## 12. Video Demo & Thuyết trình
 
-- **Link Video (Google Drive / YouTube):** [Dán link video demo có khuôn mặt và thuyết trình của 6 thành viên tại đây]
+- **Link Video (Google Drive / YouTube):** 
 - **Quy định video:** Thể hiện đầy đủ các chức năng bắt buộc, ít nhất 1 kịch bản lỗi/mất kết nối, mỗi thành viên trình bày phần việc của mình và bật webcam.
 
 ---
