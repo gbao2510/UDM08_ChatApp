@@ -1,0 +1,515 @@
+/* =========================================================================
+   STYLE.CSS - GIAO DIỆN CHAT APPLICATION (PASTEL GRADIENT & MODERN PILL BAR)
+   Tác giả: Nguyễn Gia Bảo
+   Thiết kế chuẩn 100% theo mẫu Mockup:
+   - Nền cửa sổ: Gradient Pastel dịu mát (#d5e9ea -> #e0d5f7 -> #c9d3dd)
+   - Khung Card: Trắng sáng bo tròn 16px (#ffffff)
+   - Nút Kết nối: Xanh đại dương (#1b657e)
+   - Bong bóng tin nhắn chính mình: Gradient Tím Indigo (#4F46E8 -> #8B5CF6)
+   - Bong bóng tin nhắn đối phương: Xám băng dịu nhẹ (#f1f5f9)
+   - Thanh tin nhắn:
+     * Nút tròn dấu (+) bên trái (#e2e8f0)
+     * Ô nhập dạng Pill bo tròn trắng (#ffffff) chứa ô gõ chữ và 3 icon (📎, 😊, 🎙️)
+     * Nút Send màu Gradient xanh biển (#27a4fe -> #4c61f2) kèm icon ✈
+   ========================================================================= */
+
+/* -------------------------------------------------------------------------
+   1. CẤU HÌNH TOÀN CỤC & NỀN PASTEL GRADIENT
+   ------------------------------------------------------------------------- */
+QWidget {
+    font-family: 'Segoe UI', -apple-system, 'SF Pro Display', Roboto, Helvetica, Arial, sans-serif;
+    color: #1e293b;
+    outline: none;
+}
+
+QMainWindow, QWidget#centralWidget {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #d5e9ea, stop:0.5 #e0d5f7, stop:1 #c9d3dd);
+}
+
+/* Tooltip gợi ý */
+QToolTip {
+    background-color: #1e293b;
+    color: #ffffff;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+
+/* -------------------------------------------------------------------------
+   2. THANH CẤU HÌNH MẠNG TRÊN CÙNG (TOP BAR / NETWORK BOX)
+   ------------------------------------------------------------------------- */
+QFrame#networkBox {
+    background-color: #ffffff;
+    border: 1px solid rgba(226, 232, 240, 0.9);
+    border-radius: 14px;
+}
+
+/* Nhãn trên thanh top bar */
+QLabel#lblTopBar {
+    border: none;
+    font-weight: 600;
+    color: #334155;
+    font-size: 13px;
+    background: transparent;
+}
+
+/* Ô nhập liệu: Username, IP, Port */
+QLineEdit#txtUsername,
+QLineEdit#txtIp,
+QLineEdit#txtPort {
+    background-color: #ffffff;
+    color: #0f172a;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 13px;
+    selection-background-color: #4F46E8;
+}
+
+QLineEdit#txtUsername:hover,
+QLineEdit#txtIp:hover,
+QLineEdit#txtPort:hover {
+    border: 1px solid #94a3b8;
+}
+
+QLineEdit#txtUsername:focus,
+QLineEdit#txtIp:focus,
+QLineEdit#txtPort:focus {
+    background-color: #ffffff;
+    border: 1.5px solid #27a4fe;
+}
+
+/* Nút Kết nối Server - Màu xanh đại dương (#1b657e) */
+QPushButton#btnConnect {
+    background-color: #1b657e;
+    color: #ffffff;
+    font-weight: bold;
+    padding: 6px 18px;
+    border-radius: 8px;
+    border: none;
+    font-size: 13px;
+}
+
+QPushButton#btnConnect:hover {
+    background-color: #155368;
+}
+
+QPushButton#btnConnect:pressed {
+    background-color: #0f3e4e;
+}
+
+QPushButton#btnConnect:disabled {
+    background-color: #e2e8f0;
+    color: #94a3b8;
+}
+
+/* Nhãn trạng thái kết nối */
+QLabel#lblStatus {
+    border: none;
+    color: #647488;
+    font-style: italic;
+    font-size: 13px;
+    background: transparent;
+}
+
+/* -------------------------------------------------------------------------
+   3. THANH BÊN DANH SÁCH BẠN BÈ ONLINE (SIDEBAR)
+   ------------------------------------------------------------------------- */
+QLabel#lblOnlineTitle,
+QLabel#lblChatTitle {
+    color: #1e293b;
+    font-weight: bold;
+    font-size: 13px;
+    margin-bottom: 2px;
+    background: transparent;
+}
+
+QScrollArea#sidebarScroll,
+QScrollArea#chatScrollArea {
+    border: 1px solid rgba(226, 232, 240, 0.9);
+    border-radius: 16px;
+    background-color: #ffffff;
+}
+
+QWidget#sidebarContent,
+QWidget#chatContainer {
+    background-color: #ffffff;
+}
+
+/* Từng dòng user trong danh sách online kèm hiệu ứng hover mềm */
+QWidget#userRow {
+    background-color: transparent;
+    border-radius: 10px;
+}
+
+QWidget#userRow:hover {
+    background-color: #f1f5f9;
+}
+
+QLabel#userName {
+    color: #1e293b;
+    font-size: 13px;
+    font-weight: 600;
+    background: transparent;
+}
+
+QLabel#userNameSelf {
+    color: #1e293b;
+    font-size: 13px;
+    font-weight: bold;
+    background: transparent;
+}
+
+QLabel#userStatus {
+    color: #10b981;
+    font-size: 11px;
+    font-weight: 500;
+    background: transparent;
+}
+
+QLabel#userStatusOffline {
+    color: #94a3b8;
+    font-size: 11px;
+    background: transparent;
+}
+
+/* Chấm trạng thái online / offline viền trắng 2px */
+QLabel#dotOnline {
+    background-color: #10b981;
+    border-radius: 6px;
+    border: 2px solid #ffffff;
+}
+
+QLabel#dotOffline {
+    background-color: #94a3b8;
+    border-radius: 6px;
+    border: 2px solid #ffffff;
+}
+
+/* -------------------------------------------------------------------------
+   4. KHUNG CHAT & BONG BÓNG TIN NHẮN (GRADIENT VIBRANT BUBBLES)
+   ------------------------------------------------------------------------- */
+/* Bong bóng tin nhắn của bạn (Gradient Tím Indigo #4F46E8 -> #8B5CF6) */
+QLabel#bubbleSelf {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #4F46E8, stop:1 #8B5CF6);
+    color: #ffffff;
+    border-radius: 18px;
+    border-bottom-right-radius: 4px;
+    padding: 10px 16px;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+QLabel#bubbleSelf:hover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #4338CA, stop:1 #7C3AED);
+}
+
+/* Bong bóng tin nhắn bạn bè (Màu xám băng dịu nhẹ #f1f5f9) */
+QLabel#bubbleOther {
+    background-color: #f1f5f9;
+    color: #1e293b;
+    border-radius: 18px;
+    border-bottom-left-radius: 4px;
+    padding: 10px 16px;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+QLabel#bubbleOther:hover {
+    background-color: #e2e8f0;
+}
+
+/* Tên người gửi phía trên bong bóng chat */
+QLabel#senderName {
+    color: #647488;
+    font-size: 12px;
+    font-weight: 500;
+    margin-left: 6px;
+    margin-bottom: 2px;
+    background: transparent;
+}
+
+/* Nút Trả lời (Reply) cạnh tin nhắn */
+QPushButton#btnReply {
+    background-color: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 14px;
+    color: #647488;
+    font-size: 13px;
+    font-weight: bold;
+    padding-bottom: 2px;
+}
+
+QPushButton#btnReply:hover {
+    background-color: #eff6ff;
+    border: 1px solid #27a4fe;
+    color: #27a4fe;
+}
+
+QPushButton#btnReply:pressed {
+    background-color: #dbeafe;
+}
+
+/* Thanh trạng thái phụ khi Reply */
+QFrame#replyStatusBar {
+    background-color: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-left: 4px solid #4F46E8;
+    border-radius: 8px;
+}
+
+QFrame#replyStatusBar:hover {
+    background-color: #f1f5f9;
+    border-left: 4px solid #4338CA;
+}
+
+QLabel#lblReplyStatus {
+    border: none;
+    color: #4F46E8;
+    font-size: 12px;
+    font-weight: bold;
+    background: transparent;
+}
+
+QLabel#lblReplyPreview {
+    border: none;
+    color: #647488;
+    font-size: 12px;
+    font-style: italic;
+    background: transparent;
+}
+
+/* Nút hủy Reply hình tròn */
+QPushButton#btnCancelReply {
+    background-color: #e2e8f0;
+    color: #475569;
+    font-weight: bold;
+    font-size: 11px;
+    border: none;
+    border-radius: 11px;
+}
+
+QPushButton#btnCancelReply:hover {
+    background-color: #ef4444;
+    color: #ffffff;
+}
+
+QPushButton#btnCancelReply:pressed {
+    background-color: #dc2626;
+}
+
+/* Thông báo hệ thống */
+QLabel#lblSystemMessage {
+    color: #647488;
+    font-style: italic;
+    font-size: 12px;
+    padding: 6px 12px;
+    background: transparent;
+}
+
+/* Bong bóng fallback nếu không nạp được MessageItem */
+QLabel#fallbackMessage {
+    background-color: #f1f5f9;
+    color: #1e293b;
+    border-radius: 12px;
+    padding: 8px 12px;
+    font-size: 13px;
+}
+
+/* -------------------------------------------------------------------------
+   5. KHU VỰC THANH NHẬP TIN NHẮN (MODERN PILL BAR & ICONS)
+   ------------------------------------------------------------------------- */
+/* Nút tròn dấu (+) bên trái */
+QPushButton#btnPlus {
+    background-color: rgba(255, 255, 255, 0.7);
+    color: #475569;
+    font-size: 22px;
+    font-weight: 300;
+    border: 1px solid rgba(226, 232, 240, 0.8);
+    border-radius: 19px;
+}
+
+QPushButton#btnPlus:hover {
+    background-color: #ffffff;
+    color: #1e293b;
+    border-color: #cbd5e1;
+}
+
+QPushButton#btnPlus:pressed {
+    background-color: #e2e8f0;
+}
+
+/* Khung pill tròn màu trắng chứa ô nhập và các nút chức năng */
+QFrame#inputPill {
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 20px;
+}
+
+QFrame#inputPill:hover {
+    border: 1px solid #cbd5e1;
+}
+
+/* Ô nhập chữ bên trong khung pill (không viền, nền trong suốt) */
+QTextEdit#inputMessage,
+QLineEdit#inputMessage {
+    background: transparent;
+    color: #0f172a;
+    border: none;
+    padding: 6px 8px;
+    font-size: 14px;
+    selection-background-color: #27a4fe;
+}
+
+/* Các nút biểu tượng bên phải thanh pill (📎, 😊, 🎙️) */
+QPushButton#btnAttach,
+QPushButton#btnEmoji,
+QPushButton#btnMic {
+    background: transparent;
+    color: #647488;
+    border: none;
+    border-radius: 15px;
+    font-size: 17px;
+    padding: 0px;
+}
+
+QPushButton#btnAttach:hover,
+QPushButton#btnEmoji:hover,
+QPushButton#btnMic:hover {
+    background-color: #f1f5f9;
+    color: #27a4fe;
+}
+
+QPushButton#btnAttach:pressed,
+QPushButton#btnEmoji:pressed,
+QPushButton#btnMic:pressed {
+    background-color: #e2e8f0;
+}
+
+/* Nút Gửi (Send) Gradient xanh biển chuẩn theo Mockup (#27a4fe -> #4c61f2) */
+QPushButton#btnSend {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #27a4fe, stop:0.5 #367fee, stop:1 #4c61f2);
+    color: #ffffff;
+    font-weight: bold;
+    border-radius: 19px;
+    font-size: 14px;
+    padding: 6px 18px;
+    border: none;
+}
+
+QPushButton#btnSend:hover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #1898f0, stop:0.5 #2871e0, stop:1 #3e53e4);
+}
+
+QPushButton#btnSend:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0f86dc, stop:0.5 #1d60ce, stop:1 #2e43ce);
+}
+
+QPushButton#btnSend:disabled {
+    background: #cbd5e1;
+    color: #94a3b8;
+}
+
+/* -------------------------------------------------------------------------
+   6. THANH CUỘN HIỆN ĐẠI (SLIM LIGHT SCROLLBAR)
+   ------------------------------------------------------------------------- */
+QScrollBar:vertical {
+    border: none;
+    background: transparent;
+    width: 6px;
+    margin: 0px;
+}
+
+QScrollBar::handle:vertical {
+    background-color: #cbd5e1;
+    min-height: 28px;
+    border-radius: 3px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background-color: #94a3b8;
+}
+
+QScrollBar::handle:vertical:pressed {
+    background-color: #27a4fe;
+}
+
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {
+    border: none;
+    background: none;
+    height: 0px;
+}
+
+QScrollBar::add-page:vertical,
+QScrollBar::sub-page:vertical {
+    background: none;
+}
+
+QScrollBar:horizontal {
+    border: none;
+    background: transparent;
+    height: 6px;
+    margin: 0px;
+}
+
+QScrollBar::handle:horizontal {
+    background-color: #cbd5e1;
+    min-width: 28px;
+    border-radius: 3px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background-color: #94a3b8;
+}
+
+QScrollBar::add-line:horizontal,
+QScrollBar::sub-line:horizontal {
+    border: none;
+    background: none;
+    width: 0px;
+}
+
+/* -------------------------------------------------------------------------
+   7. MENU CHUỘT PHẢI & HỘP THOẠI (CONTEXT MENU & DIALOGS)
+   ------------------------------------------------------------------------- */
+QMenu {
+    background-color: #ffffff;
+    color: #1e293b;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 4px;
+}
+
+QMenu::item {
+    background-color: transparent;
+    padding: 6px 20px;
+    border-radius: 6px;
+    font-size: 13px;
+}
+
+QMenu::item:selected {
+    background-color: #eff6ff;
+    color: #27a4fe;
+}
+
+QMenu::separator {
+    height: 1px;
+    background-color: #e2e8f0;
+    margin: 4px 8px;
+}
+
+QDialog {
+    background-color: #ffffff;
+    color: #1e293b;
+}
+
+QMessageBox {
+    background-color: #ffffff;
+}
+
+QMessageBox QLabel {
+    color: #1e293b;
+    font-size: 13px;
+}

@@ -16,16 +16,20 @@ def on_received(data: dict):
 def on_error(err: str):
     print(f"[TEST] ❌ Lỗi phát sinh: {err}")
 
+def on_timeout(msg: str):
+    print(f"[TEST] ⏳ TIMEOUT: {msg}")
+
 if __name__ == "__main__":
     app = QCoreApplication(sys.argv)
 
-    # Khởi tạo client (Đã chỉnh port về 5000 để khớp với server_core.py)
+    # Khởi tạo client
     client = NetworkClient(host='127.0.0.1', port=5000)
 
     # Đăng ký các tín hiệu (Signals)
     client.connected_signal.connect(on_connected)
     client.received_signal.connect(on_received)
     client.error_signal.connect(on_error)
+    client.timeout_signal.connect(on_timeout)   # Nhận cảnh báo timeout / mất mạng
 
     # Thực hiện kết nối tới Server
     print("[TEST] Đang kết nối tới Server...")
