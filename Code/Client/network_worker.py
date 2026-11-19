@@ -27,7 +27,11 @@ class NetworkClient(QThread):
 
         try:
             self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            # Thiết lập timeout 5 giây khi kết nối để tránh treo vô hạn nếu IP/Port không phản hồi
+            self.client_socket.settimeout(5.0)
             self.client_socket.connect((self.host, self.port))
+            # Sau khi kết nối thành công, trả socket về chế độ non-timeout (blocking) cho luồng đọc recv
+            self.client_socket.settimeout(None)
             self.is_running = True
             
             # Thông báo cho UI biết kết nối thành công
