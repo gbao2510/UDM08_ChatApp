@@ -393,7 +393,30 @@ Giao diện đầy đủ sẽ hiện ra. Có thể dùng mà không kết nối 
 
 ---
 
-## 12. Thông tin liên hệ & Repository
+## 12. Video Demo & Thuyết trình
+
+- **Link Video (Google Drive / YouTube):** 
+- **Quy định video:** Thể hiện đầy đủ các chức năng bắt buộc, ít nhất 1 kịch bản lỗi/mất kết nối, mỗi thành viên trình bày phần việc của mình và bật webcam.
+
+---
+
+## 13. Hướng dẫn đóng gói nộp bài (Course Submission)
+
+Trước khi nộp bài trên hệ thống môn học, nhóm thực hiện dọn dẹp các tệp tạm / cache và đóng gói theo định dạng quy định:
+
+```bash
+# 1. Xóa cache Python và các file sinh tự động
+# Windows PowerShell:
+Get-ChildItem -Path . -Include __pycache__,.pytest_cache -Recurse -Force | Remove-Item -Recurse -Force
+Remove-Item -Path server.log -Force -ErrorAction SilentlyContinue
+
+# 2. Nén toàn bộ thư mục thành file .7z đúng định dạng:
+# CourseCode-GroupCode-ProjectCode.7z (Ví dụ: IT008-N08-UDM_08.7z)
+```
+
+---
+
+## 14. Thông tin liên hệ & Repository
 
 - **GitHub:** https://github.com/gbao2510/UDM08_ChatApp
 - **Nhánh chính:** `main`

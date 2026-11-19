@@ -397,7 +397,6 @@ def validate_username(raw_username):
  
  
 class ServerCore:
-    def __init__(self, host=HOST, port=PORT):
     def __init__(self, host=HOST, port=PORT, heartbeat_interval=HEARTBEAT_INTERVAL,
                  idle_timeout=IDLE_TIMEOUT, log_file="server.log"):
         # Địa chỉ IP (0.0.0.0 chấp nhận kết nối từ mọi card mạng) và cổng lắng nghe
@@ -432,12 +431,8 @@ class ServerCore:
  
 
         configure_utf8_console()
-        self.setup_logger()
+        self.setup_logger(log_file=log_file)
  
-    def setup_logger(self):
-        """Cấu hình ghi log ra Console và file server.log"""
-        self.setup_logger(log_file)
-
     def setup_logger(self, log_file="server.log"):
         """Cấu hình ghi log ra Console và file server.log (log_file=None: chỉ ra Console)"""
         log_format = "%(asctime)s - [%(levelname)s] - (%(threadName)s) - %(message)s"
@@ -447,10 +442,6 @@ class ServerCore:
         logging.basicConfig(
             level=logging.INFO,
             format=log_format,
-            handlers=[
-                logging.FileHandler("server.log", encoding="utf-8"),
-                logging.StreamHandler(sys.stdout)
-            ]
             handlers=handlers
         )
         self.logger = logging.getLogger("ServerCore")
@@ -486,13 +477,14 @@ class ServerCore:
             with send_lock:
                 client_socket.sendall(data_to_send)
             return True
-        except Exception as e:
-            self.logger.error(f"Lỗi khi gửi dữ liệu tới Client: {e}")
         except OSError as e:
             # Gồm BrokenPipe/ConnectionReset/Aborted và cả timeout khi Client không đọc.
             # Gửi dở dang làm hỏng luồng byte nên bắt buộc phải đóng hẳn socket.
             self.logger.warning(f"Lỗi khi gửi dữ liệu tới Client, ngắt kết nối: {e}")
             self.disconnect_client(client_socket)
+            return False
+        except Exception as e:
+            self.logger.error(f"Lỗi khi gửi dữ liệu tới Client: {e}")
             return False
  
 
@@ -585,9 +577,6 @@ class ServerCore:
                 break
 
             try:
-                client_socket, client_address = self.server_socket.accept()
-                self.logger.info(f"Client mới kết nối thành công từ địa chỉ: {client_address}")
- 
                 client_socket, client_address = server_socket.accept()
             except socket.timeout:
                 continue  # chỉ để kiểm tra lại is_running
@@ -738,8 +727,6 @@ class ServerCore:
 
         try:
             while self.is_running:
-                data = client_socket.recv(BUFFER_SIZE)
- 
                 try:
                     data = client_socket.recv(BUFFER_SIZE)
                 except socket.timeout:
@@ -798,34 +785,11 @@ class ServerCore:
             reason = f"Lỗi không mong đợi: {e}"
             self.logger.error(f"Lỗi xử lý Client {client_address} ({current_username}): {e}")
         finally:
-            # DỌN DẸP KHI CLIENT THOÁT
             # DỌN DẸP KHI CLIENT THOÁT - luôn chạy, dù thoát bằng cách nào
             router.reset()  # bỏ buffer dở dang
-            self.disconnect_client(client_socket, reason)
             with self.lock:
-                self.clients.pop(client_socket, None)
-                self.send_locks.pop(client_socket, None)
- 
-            try:
-                client_socket.close()
-            except Exception:
-                pass
- 
                 self.client_threads.discard(threading.current_thread())
-
-            self.logger.info(f"Đã giải phóng tài nguyên của [{current_username}] ({client_address}).")
- 
-            # Client đã đăng nhập rời đi: gửi user_leave và cập nhật lại danh sách online cho những người còn lại
-            if current_username:
-                leave_packet = {
-                    "type": "user_leave",
-                    "username": current_username
-                }
-                with self.lock:
-                    remaining_sockets = list(self.clients.keys())
-                for sock in remaining_sockets:
-                    self.send_packet(sock, leave_packet)
-                self.broadcast_online_list()
+            self.disconnect_client(client_socket, reason)
  
 
     def disconnect_client(self, client_socket, reason=None):
@@ -870,14 +834,11 @@ class ServerCore:
  
 
         with self.lock:
-            sockets = list(self.send_locks.keys())  # gồm cả Client chưa đăng nhập
-            # gồm cả Client chưa đăng nhập
             sockets = list(self.send_locks.keys()) + [s for s in self.clients if s not in self.send_locks]
             threads = list(self.client_threads)
             server_socket, self.server_socket = self.server_socket, None
             self.clients.clear()
             self.send_locks.clear()
- 
 
         # Đóng socket Client: shutdown() đánh thức các luồng đang chờ recv()
         for sock in sockets:
@@ -885,28 +846,14 @@ class ServerCore:
 
         if server_socket:
             try:
-                sock.shutdown(socket.SHUT_RDWR)  # đánh thức luồng đang chờ recv()
+                server_socket.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
             try:
-                sock.close()
-            except OSError:
-                pass
- 
-        if self.server_socket:
-            try:
-                self.server_socket.close()
-                # shutdown() đánh thức accept() đang bị kẹt (Linux không tự thức dậy khi close()).
-                try:
-                    server_socket.shutdown(socket.SHUT_RDWR)
-                except OSError:
-                    pass
                 server_socket.close()
                 self.logger.info("Đã đóng Socket Server chính.")
             except Exception as e:
                 self.logger.error(f"Lỗi khi đóng Socket Server chính: {e}")
-            finally:
-                self.server_socket = None
  
  
 

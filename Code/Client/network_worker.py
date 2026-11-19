@@ -34,7 +34,7 @@ class NetworkClient(QThread):
         try:
             self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-            # Giới hạn thời gian chờ kết nối, nếu Server không phản hồi sau CONNECT_TIMEOUT giây  thì socket.connect() ném ra socket.timeout, bắt được ngay dưới đây
+            # Giới hạn thời gian chờ kết nối, nếu Server không phản hồi sau CONNECT_TIMEOUT giây thì ném socket.timeout
             self.client_socket.settimeout(CONNECT_TIMEOUT)
             self.client_socket.connect((self.host, self.port))
 
@@ -66,13 +66,13 @@ class NetworkClient(QThread):
             return False
 
     def run(self):
-        """Luồng chạy ngầm liên tục lắng nghe dữ liệu từ Server"""
-        buffer = ""
+        """Luồng chạy ngầm liên tục lắng nghe dữ liệu từ Server (sử dụng bytearray buffer chống lỗi UTF-8/emoji bị cắt đôi)"""
+        buffer = bytearray()
         consecutive_errors = 0  # Đếm số lần lỗi recv liên tiếp để phát hiện mất mạng
 
         while self.is_running:
             try:
-                data = self.client_socket.recv(4096).decode('utf-8')
+                data = self.client_socket.recv(4096)
 
                 if not data:
                     # Server đóng kết nối bình thường
@@ -82,11 +82,13 @@ class NetworkClient(QThread):
 
                 # Nhận được dữ liệu, reset bộ đếm lỗi
                 consecutive_errors = 0
-                buffer += data
+                buffer.extend(data)
 
-                while "\n" in buffer:
-                    line, buffer = buffer.split("\n", 1)
-                    line = line.strip()
+                while b"\n" in buffer:
+                    newline_pos = buffer.find(b"\n")
+                    line_bytes = bytes(buffer[:newline_pos])
+                    del buffer[:newline_pos + 1]
+                    line = line_bytes.decode('utf-8', errors='replace').strip()
                     if line:
                         try:
                             json_data = json.loads(line)
