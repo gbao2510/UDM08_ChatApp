@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QFrame, QMessageBox, QScrollArea
 )
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QKeySequence, QShortcut
 
 def load_stylesheet(filename: str = "style.css") -> str:
     """Đọc và nạp nội dung file CSS/QSS riêng biệt từ thư mục Client"""
@@ -63,6 +63,7 @@ class MainWindow(QMainWindow):
         # Cài đặt giao diện và nạp stylesheet từ file CSS riêng
         self.setup_ui()
         self.apply_stylesheet()
+        self.setup_shortcuts()
         
         # Nạp dữ liệu mẫu ban đầu (Mock Data) để hiển thị đầy đủ danh sách bạn bè, avatar và tin nhắn chat
         self.load_initial_data()
@@ -118,6 +119,63 @@ class MainWindow(QMainWindow):
         else:
             self.btn_show_network.setText(f"⚙️ Cài đặt kết nối: {ip}:{port} • {user} ▼")
 
+    def setup_shortcuts(self):
+        """Cài đặt các phím tắt: Thoát/rời phòng chat bằng Ctrl+Q, Ctrl+W hoặc Ctrl+D"""
+        self.shortcut_quit = QShortcut(QKeySequence("Ctrl+Q"), self)
+        self.shortcut_quit.activated.connect(self.leave_room)
+
+        self.shortcut_close = QShortcut(QKeySequence("Ctrl+W"), self)
+        self.shortcut_close.activated.connect(self.leave_room)
+
+        self.shortcut_disconnect = QShortcut(QKeySequence("Ctrl+D"), self)
+        self.shortcut_disconnect.activated.connect(self.leave_room)
+
+    def leave_room(self):
+        """Xử lý rời khỏi phòng chat (Thoát phòng) qua phím tắt (Ctrl+Q / Ctrl+W / Ctrl+D) hoặc nút bấm"""
+        is_connected = bool(self.network_client and self.network_client.is_running)
+
+        reply = QMessageBox.question(
+            self,
+            "Xác nhận thoát phòng",
+            "Bạn có chắc chắn muốn rời khỏi phòng chat không?\n(Phím tắt: Ctrl+Q hoặc Ctrl+W)",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        my_name = self.txt_username.text().strip() or "Gia Bảo"
+
+        if is_connected:
+            try:
+                self.network_client.send_data({
+                    "type": "leave",
+                    "sender": my_name
+                })
+            except Exception:
+                pass
+            self.network_client.stop()
+
+        self.lbl_status.setText("Trạng thái: Đã rời phòng")
+        self.lbl_status.setStyleSheet("border: none; color: #fa5252; font-style: italic; font-size: 13px;")
+        self.btn_connect.setEnabled(True)
+        if hasattr(self, 'btn_leave'):
+            self.btn_leave.setEnabled(False)
+        self.txt_username.setEnabled(True)
+        self.txt_ip.setEnabled(True)
+        self.txt_port.setEnabled(True)
+
+        self.set_online_count(0)
+        for i in range(self.sidebar_content_layout.count()):
+            w = self.sidebar_content_layout.itemAt(i).widget()
+            if w:
+                for dot in w.findChildren(QLabel):
+                    if dot.width() == 12 and dot.height() == 12:
+                        dot.setStyleSheet("background-color: #94a3b8; border-radius: 6px; border: 2px solid #ffffff;")
+
+        self.add_system_message("Bạn đã rời khỏi phòng chat (Ctrl+Q).")
+        self.update_collapsed_network_text()
+
     def setup_ui(self):
         # Widget trung tâm - Quản lý qua file style.css
         central_widget = QWidget()
@@ -172,6 +230,37 @@ class MainWindow(QMainWindow):
         self.btn_connect.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_connect.clicked.connect(self.demo_connect_action)
 
+        # Nút Rời phòng (Phím tắt: Ctrl+Q hoặc Ctrl+W)
+        self.btn_leave = QPushButton("Rời phòng")
+        self.btn_leave.setObjectName("btnLeave")
+        self.btn_leave.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_leave.setToolTip("Rời khỏi phòng chat (Phím tắt: Ctrl+Q hoặc Ctrl+W)")
+        self.btn_leave.clicked.connect(self.leave_room)
+        self.btn_leave.setEnabled(False)
+        self.btn_leave.setStyleSheet("""
+            QPushButton#btnLeave {
+                background-color: #fee2e2;
+                color: #dc2626;
+                font-weight: bold;
+                padding: 6px 14px;
+                border-radius: 8px;
+                border: 1px solid #fca5a5;
+                font-size: 13px;
+            }
+            QPushButton#btnLeave:hover {
+                background-color: #fecaca;
+                border-color: #f87171;
+            }
+            QPushButton#btnLeave:pressed {
+                background-color: #fca5a5;
+            }
+            QPushButton#btnLeave:disabled {
+                background-color: #f1f5f9;
+                color: #94a3b8;
+                border: 1px solid #e2e8f0;
+            }
+        """)
+
         self.lbl_status = QLabel("Trạng thái: Chưa kết nối")
         self.lbl_status.setObjectName("lblStatus")
 
@@ -189,6 +278,7 @@ class MainWindow(QMainWindow):
         network_layout.addWidget(lbl_port)
         network_layout.addWidget(self.txt_port)
         network_layout.addWidget(self.btn_connect)
+        network_layout.addWidget(self.btn_leave)
         network_layout.addWidget(self.lbl_status)
         network_layout.addStretch()
         network_layout.addWidget(self.btn_hide_network)
@@ -761,6 +851,8 @@ class MainWindow(QMainWindow):
         self.lbl_status.setText("Trạng thái: Đã kết nối Server")
         self.lbl_status.setStyleSheet("border: none; color: #40c057; font-weight: bold; font-size: 13px;")
         self.btn_connect.setEnabled(False)
+        if hasattr(self, 'btn_leave'):
+            self.btn_leave.setEnabled(True)
         self.txt_username.setEnabled(False)
         self.txt_ip.setEnabled(False)
         self.txt_port.setEnabled(False)
@@ -781,6 +873,8 @@ class MainWindow(QMainWindow):
         self.lbl_status.setText("Trạng thái: Đã ngắt kết nối")
         self.lbl_status.setStyleSheet("border: none; color: #b0b3b8; font-style: italic; font-size: 13px;")
         self.btn_connect.setEnabled(True)
+        if hasattr(self, 'btn_leave'):
+            self.btn_leave.setEnabled(False)
         self.txt_username.setEnabled(True)
         self.txt_ip.setEnabled(True)
         self.txt_port.setEnabled(True)
@@ -801,6 +895,8 @@ class MainWindow(QMainWindow):
         self.lbl_status.setText("Trạng thái: Lỗi kết nối")
         self.lbl_status.setStyleSheet("border: none; color: #fa5252; font-style: italic; font-size: 13px;")
         self.btn_connect.setEnabled(True)
+        if hasattr(self, 'btn_leave'):
+            self.btn_leave.setEnabled(False)
         self.txt_username.setEnabled(True)
         self.txt_ip.setEnabled(True)
         self.txt_port.setEnabled(True)
