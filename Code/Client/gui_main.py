@@ -55,6 +55,11 @@ class MainWindow(QMainWindow):
         self.resize(920, 650)
         self.setMinimumSize(780, 520)
 
+        # Trạng thái hội thoại (Phòng chung và Chat riêng 1-1)
+        self.chat_target = "all"
+        self.conversations = {"all": []}
+        self.unread_counts = {}
+
         # Trạng thái Reply hiện tại và danh sách user online để tái sử dụng cho menu hành động
         self.replying_to = None
         self.online_users_cache = []
@@ -67,6 +72,7 @@ class MainWindow(QMainWindow):
         
         # Nạp dữ liệu mẫu ban đầu (Mock Data) để hiển thị đầy đủ danh sách bạn bè, avatar và tin nhắn chat
         self.load_initial_data()
+        self.update_sidebar_active_state()
 
         # Khởi tạo các module liên kết
         self.emoji_dialog = EmojiPickerDialog(parent_input_field=self.txt_message) if EmojiPickerDialog else None
@@ -174,6 +180,7 @@ class MainWindow(QMainWindow):
                         dot.setStyleSheet("background-color: #94a3b8; border-radius: 6px; border: 2px solid #ffffff;")
 
         self.add_system_message("Bạn đã rời khỏi phòng chat (Ctrl+Q).")
+        self.switch_to_chat_target("all")
         self.update_collapsed_network_text()
 
     def setup_ui(self):
@@ -292,10 +299,16 @@ class MainWindow(QMainWindow):
 
         # 2.1 Sidebar: Danh sách người online với ẢNH ĐẠI DIỆN (CircularAvatar từ gui_widgets.py)
         sidebar_outer = QVBoxLayout()
-        sidebar_outer.setSpacing(4)
+        sidebar_outer.setSpacing(6)
+
+        # Thẻ chuyển nhanh về Phòng Chat Chung
+        self.row_public_room = self._create_public_room_row()
+        sidebar_outer.addWidget(self.row_public_room)
+
         self.lbl_online = QLabel()
         self.lbl_online.setObjectName("lblOnlineTitle")
         self.set_online_count(0)
+        sidebar_outer.addWidget(self.lbl_online)
 
         # Dùng QScrollArea + Widget tùy chỉnh để hiển thị Avatar + Tên (không dùng QListWidget)
         self.sidebar_scroll = QScrollArea()
@@ -310,14 +323,57 @@ class MainWindow(QMainWindow):
         self.sidebar_content_layout.setSpacing(4)
         self.sidebar_scroll.setWidget(self.sidebar_content)
 
-        sidebar_outer.addWidget(self.lbl_online)
         sidebar_outer.addWidget(self.sidebar_scroll)
         body_layout.addLayout(sidebar_outer)
 
         # 2.2 Chat Area: TÍCH HỢP MESSAGEITEM VÀ SCROLLAREA TỪ GUI_WIDGETS.PY
         chat_layout = QVBoxLayout()
-        lbl_chat = QLabel("Phòng Chat Chung")
-        lbl_chat.setObjectName("lblChatTitle")
+
+        # Thanh tiêu đề hội thoại (Chat Header) hỗ trợ chuyển đổi giữa Phòng Chung và Chat Riêng 1-1
+        chat_header = QWidget()
+        chat_header.setObjectName("chatHeader")
+        chat_header_layout = QHBoxLayout(chat_header)
+        chat_header_layout.setContentsMargins(4, 0, 4, 2)
+        chat_header_layout.setSpacing(8)
+
+        self.lbl_chat = QLabel("Phòng Chat Chung")
+        self.lbl_chat.setObjectName("lblChatTitle")
+
+        self.lbl_target_badge = QLabel("Công khai")
+        self.lbl_target_badge.setObjectName("lblTargetBadge")
+        self.lbl_target_badge.setStyleSheet(
+            "background-color: #e2e8f0; color: #475569; border-radius: 8px; padding: 2px 8px; font-size: 11px; font-weight: 600;"
+        )
+
+        self.btn_back_to_public = QPushButton("🌐 Về phòng chung")
+        self.btn_back_to_public.setObjectName("btnBackToPublic")
+        self.btn_back_to_public.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_back_to_public.setToolTip("Quay lại trò chuyện trong Phòng Chat Chung")
+        self.btn_back_to_public.setStyleSheet("""
+            QPushButton#btnBackToPublic {
+                background-color: #eff6ff;
+                color: #2563eb;
+                border: 1px solid #bfdbfe;
+                border-radius: 12px;
+                padding: 4px 12px;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            QPushButton#btnBackToPublic:hover {
+                background-color: #dbeafe;
+                border-color: #93c5fd;
+            }
+            QPushButton#btnBackToPublic:pressed {
+                background-color: #bfdbfe;
+            }
+        """)
+        self.btn_back_to_public.clicked.connect(lambda: self.switch_to_chat_target("all"))
+        self.btn_back_to_public.hide()
+
+        chat_header_layout.addWidget(self.lbl_chat)
+        chat_header_layout.addWidget(self.lbl_target_badge)
+        chat_header_layout.addStretch()
+        chat_header_layout.addWidget(self.btn_back_to_public)
 
         self.scroll_chat = QScrollArea()
         self.scroll_chat.setObjectName("chatScrollArea")
@@ -357,7 +413,7 @@ class MainWindow(QMainWindow):
         reply_bar_layout.addWidget(self.btn_cancel_reply)
         self.reply_bar.hide()
 
-        chat_layout.addWidget(lbl_chat)
+        chat_layout.addWidget(chat_header)
         chat_layout.addWidget(self.scroll_chat)
         chat_layout.addWidget(self.reply_bar)
         body_layout.addLayout(chat_layout, stretch=1)
@@ -435,8 +491,52 @@ class MainWindow(QMainWindow):
 
         main_layout.addLayout(bottom_layout)
 
+    def _create_public_room_row(self) -> QFrame:
+        """Tạo thẻ bấm chuyển nhanh về Phòng Chat Chung trên đầu sidebar"""
+        frame = QFrame()
+        frame.setObjectName("rowPublicRoom")
+        frame.setFixedHeight(52)
+        frame.setCursor(Qt.CursorShape.PointingHandCursor)
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setSpacing(10)
+
+        icon_lbl = QLabel("🌐")
+        icon_lbl.setFixedSize(38, 38)
+        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_lbl.setStyleSheet("background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #dbeafe, stop:1 #bfdbfe); border-radius: 19px; font-size: 18px;")
+
+        text_vbox = QVBoxLayout()
+        text_vbox.setSpacing(1)
+        lbl_title = QLabel("Phòng Chat Chung")
+        lbl_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #1e293b; background: transparent;")
+        lbl_sub = QLabel("Tất cả thành viên")
+        lbl_sub.setStyleSheet("font-size: 11px; color: #64748b; background: transparent;")
+        text_vbox.addWidget(lbl_title)
+        text_vbox.addWidget(lbl_sub)
+
+        self.badge_public = QLabel("")
+        self.badge_public.setObjectName("badgePublic")
+        self.badge_public.setFixedSize(18, 18)
+        self.badge_public.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.badge_public.setStyleSheet("background-color: #3b82f6; color: #ffffff; border-radius: 9px; font-size: 10px; font-weight: bold;")
+        self.badge_public.hide()
+
+        layout.addWidget(icon_lbl)
+        layout.addLayout(text_vbox, stretch=1)
+        layout.addWidget(self.badge_public)
+
+        # Chặn bắt chuột ở label con để click trúng frame
+        icon_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        lbl_title.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        lbl_sub.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.badge_public.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+        frame.mousePressEvent = lambda e: self.switch_to_chat_target("all")
+        return frame
+
     def load_initial_data(self):
-        """Nạp dữ liệu mẫu ban đầu (Mock Data) gồm cả ảnh đại diện trong sidebar"""
+        """Nạp dữ liệu mẫu ban đầu (Mock Data) gồm cả ảnh đại diện trong sidebar và phân chia hội thoại"""
         # 1. Danh sách thành viên với avatar mẫu
         mock_users = [
             {"name": "Trần Thuận Trí", "online": True,  "is_self": False},
@@ -453,29 +553,55 @@ class MainWindow(QMainWindow):
             self.sidebar_content_layout.addWidget(row)
         self.set_online_count(len(mock_users))
 
-        # 2. Nạp bong bóng tin nhắn mẫu chuẩn từ gui_widgets.py
+        # 2. Nạp bong bóng tin nhắn mẫu chuẩn từ gui_widgets.py vào Phòng Chat Chung
         mock_messages = [
             {"sender": "Ngô Gia Bảo",  "text": "Tiến độ hoàn thành như nào rồi.", "is_self": False},
             {"sender": "Nguyễn Gia Bảo", "text": "T đang hoàn thiện component MessageItem hiển thị độc lập.", "is_self": True},
             {"sender": "Lý Huỳnh Bích Trâm", "text": "Socket client tuần này gửi nhận chuỗi JSON cơ bản được rồi.", "is_self": False},
             {"sender": "Nguyễn Gia Bảo", "text": "Thử nghiệm tin nhắn dài tự động xuống dòng và co giãn chiều cao xem bong bóng chat có hoạt động chuẩn không.", "is_self": True},
         ]
+        self.conversations["all"] = []
         for data in mock_messages:
             self.add_message_to_chat(
                 sender=data["sender"],
                 message=data["text"],
-                is_self=data["is_self"]
+                is_self=data["is_self"],
+                target="all"
             )
 
+        # 3. Tạo sẵn dữ liệu mẫu cho cuộc trò chuyện riêng với Trần Thuận Trí
+        self.conversations["Trần Thuận Trí"] = [
+            {
+                "sender": "Trần Thuận Trí",
+                "message": "Chào Bảo, bạn đã xong phần giao diện tin nhắn riêng 1-1 chưa?",
+                "is_self": False,
+                "msg_id": 101,
+                "avatar_path": None,
+                "reply_to": None,
+                "target": "Trần Thuận Trí",
+            },
+            {
+                "sender": "Nguyễn Gia Bảo",
+                "message": "Mình vừa hoàn thiện xong! Bạn chỉ cần click trực tiếp vào tên bất kỳ ai trên sidebar là có thể nhắn riêng rồi nhé.",
+                "is_self": True,
+                "msg_id": 102,
+                "avatar_path": getattr(self, "my_avatar", "default_avatar.png"),
+                "reply_to": None,
+                "target": "Trần Thuận Trí",
+            }
+        ]
+
     # =========================================================================
-    # NHIỆM VỤ TUẦN 3 (NGUYỄN GIA BẢO): THÊM ẢNH ĐẠI DIỆN VÀO DANH SÁCH BẠN BÈ ONLINE
+    # NHIỆM VỤ TUẦN 3 & TIN NHẮN RIÊNG: HIỂN THỊ DANH SÁCH BẠN BÈ VÀ CHỌN CHAT 1-1
     # =========================================================================
     def _make_user_row(self, name: str, is_online: bool = True, avatar_path: str = None) -> QWidget:
         """
         Tạo 1 dòng hiển thị người dùng trong sidebar gồm:
         - Ảnh đại diện tròn (CircularAvatar từ gui_widgets.py)
         - Chấm trạng thái xanh/xám overlay lên góc avatar
-        - Tên người dùng
+        - Tên người dùng và trạng thái
+        - Huy hiệu số tin nhắn chưa đọc (nếu có)
+        - Sự kiện click chuột để chuyển sang chat riêng 1-1
         """
         # Đường dẫn ảnh đại diện: ghép với thư mục assets/ nếu là tên file tương đối
         default_avatar = os.path.join(current_dir, "assets", "default_avatar.png")
@@ -518,7 +644,6 @@ class MainWindow(QMainWindow):
         dot.setFixedSize(12, 12)
         dot.setParent(avatar_frame)
         dot.move(28, 28)          # Góc dưới bên phải của avatar 38px
-        # Dự phòng fallback màu chấm viền trắng
         dot.setStyleSheet(
             f"background-color: {'#10b981' if is_online else '#94a3b8'}; border-radius: 6px; border: 2px solid #ffffff;"
         )
@@ -543,11 +668,52 @@ class MainWindow(QMainWindow):
         text_layout.addWidget(lbl_status_txt)
         row_layout.addLayout(text_layout, stretch=1)
 
-        return row
+        # Huy hiệu tin nhắn riêng chưa đọc
+        lbl_badge = QLabel()
+        lbl_badge.setObjectName("lblUnreadBadge")
+        lbl_badge.setFixedSize(18, 18)
+        lbl_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_badge.setStyleSheet(
+            "background-color: #ef4444; color: #ffffff; border-radius: 9px; font-size: 10px; font-weight: bold;"
+        )
+        unread_count = self.unread_counts.get(name, 0) if hasattr(self, 'unread_counts') else 0
+        if unread_count > 0 and (not hasattr(self, 'chat_target') or self.chat_target != name):
+            lbl_badge.setText(str(unread_count) if unread_count <= 99 else "99+")
+            lbl_badge.show()
+        else:
+            lbl_badge.hide()
+        row_layout.addWidget(lbl_badge)
 
-        text_layout.addWidget(lbl_name)
-        text_layout.addWidget(lbl_status_txt)
-        row_layout.addLayout(text_layout, stretch=1)
+        # Để sự kiện click chuột luôn rơi vào `row`
+        for child in (avatar_frame, lbl_name, lbl_status_txt, lbl_badge):
+            child.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+        row.mousePressEvent = lambda event, target_name=name: self.on_user_row_clicked(target_name)
+
+        # Áp dụng màu active nếu đang chọn chat riêng với user này
+        is_active = (hasattr(self, 'chat_target') and self.chat_target == name)
+        if is_active:
+            row.setStyleSheet("""
+                QWidget#userRow {
+                    background-color: #e0e7ff;
+                    border-radius: 10px;
+                    border: 1.5px solid #6366f1;
+                }
+                QWidget#userRow:hover {
+                    background-color: #dbeafe;
+                }
+            """)
+        else:
+            row.setStyleSheet("""
+                QWidget#userRow {
+                    background-color: transparent;
+                    border-radius: 10px;
+                    border: 1.5px solid transparent;
+                }
+                QWidget#userRow:hover {
+                    background-color: #f1f5f9;
+                }
+            """)
 
         return row
 
@@ -636,6 +802,242 @@ class MainWindow(QMainWindow):
         return list(self.online_users_cache)
 
     # =========================================================================
+    # QUẢN LÝ CHUYỂN ĐỔI HỘI THOẠI & TIN NHẮN RIÊNG 1-1
+    # =========================================================================
+    def on_user_row_clicked(self, target_name: str):
+        """Xử lý khi người dùng click vào một bạn bè trong danh sách online"""
+        my_name = self.txt_username.text().strip() if hasattr(self, 'txt_username') else ""
+        if target_name == my_name:
+            self.add_system_message("Đây là tài khoản của chính bạn.")
+            return
+        self.switch_to_chat_target(target_name)
+
+    def switch_to_chat_target(self, target: str):
+        """Chuyển đổi khu vực chat giữa Phòng Chat Chung ('all') và Chat riêng với 1 người"""
+        target = (target or "all").strip()
+        if target == self.chat_target:
+            return
+
+        self.chat_target = target
+        
+        # Hủy trạng thái reply từ hội thoại trước để tránh gửi nhầm
+        if self.replying_to:
+            self.cancel_reply()
+
+        # Xóa badge chưa đọc của hội thoại này khi đã mở xem
+        self.unread_counts[target] = 0
+
+        self.update_chat_header()
+        self.update_sidebar_active_state()
+        self.update_sidebar_badges()
+        self.render_current_conversation()
+
+    def update_chat_header(self):
+        """Cập nhật tiêu đề, nhãn trạng thái và nút quay về trên thanh Chat Header"""
+        if self.chat_target == "all":
+            self.lbl_chat.setText("Phòng Chat Chung")
+            self.lbl_target_badge.setText("Công khai")
+            self.lbl_target_badge.setStyleSheet(
+                "background-color: #e2e8f0; color: #475569; border-radius: 8px; padding: 2px 8px; font-size: 11px; font-weight: 600;"
+            )
+            self.btn_back_to_public.hide()
+            if hasattr(self, "txt_message") and self.txt_message:
+                self.txt_message.setPlaceholderText("Nhập tin nhắn...")
+        else:
+            self.lbl_chat.setText(f"🔒 Chat riêng: {self.chat_target}")
+            self.lbl_target_badge.setText("Tin nhắn riêng 1-1")
+            self.lbl_target_badge.setStyleSheet(
+                "background-color: #dbeafe; color: #1d4ed8; border-radius: 8px; padding: 2px 8px; font-size: 11px; font-weight: 600;"
+            )
+            self.btn_back_to_public.show()
+            if hasattr(self, "txt_message") and self.txt_message:
+                self.txt_message.setPlaceholderText(f"Nhắn riêng cho {self.chat_target}...")
+
+    def update_sidebar_active_state(self):
+        """Cập nhật viền sáng và màu nền active cho thẻ phòng chung hoặc user đang chọn"""
+        # Trạng thái nút phòng chat chung
+        if hasattr(self, "row_public_room") and self.row_public_room:
+            if self.chat_target == "all":
+                self.row_public_room.setStyleSheet("""
+                    QFrame#rowPublicRoom {
+                        background-color: #e0e7ff;
+                        border-radius: 12px;
+                        border: 1.5px solid #6366f1;
+                    }
+                    QFrame#rowPublicRoom:hover {
+                        background-color: #dbeafe;
+                    }
+                """)
+            else:
+                self.row_public_room.setStyleSheet("""
+                    QFrame#rowPublicRoom {
+                        background-color: #ffffff;
+                        border-radius: 12px;
+                        border: 1px solid #e2e8f0;
+                    }
+                    QFrame#rowPublicRoom:hover {
+                        background-color: #f1f5f9;
+                    }
+                """)
+
+        # Trạng thái từng user row
+        if hasattr(self, "sidebar_content_layout"):
+            for i in range(self.sidebar_content_layout.count()):
+                w = self.sidebar_content_layout.itemAt(i).widget()
+                if w:
+                    username = w.property("username")
+                    if username == self.chat_target:
+                        w.setStyleSheet("""
+                            QWidget#userRow {
+                                background-color: #e0e7ff;
+                                border-radius: 10px;
+                                border: 1.5px solid #6366f1;
+                            }
+                            QWidget#userRow:hover {
+                                background-color: #dbeafe;
+                            }
+                        """)
+                    else:
+                        w.setStyleSheet("""
+                            QWidget#userRow {
+                                background-color: transparent;
+                                border-radius: 10px;
+                                border: 1.5px solid transparent;
+                            }
+                            QWidget#userRow:hover {
+                                background-color: #f1f5f9;
+                            }
+                        """)
+
+    def update_sidebar_badges(self):
+        """Cập nhật các huy hiệu số tin nhắn chưa đọc trên Sidebar"""
+        # 1. Badge của Phòng Chat Chung
+        pub_count = self.unread_counts.get("all", 0)
+        if hasattr(self, "badge_public") and self.badge_public:
+            if pub_count > 0 and self.chat_target != "all":
+                self.badge_public.setText(str(pub_count) if pub_count <= 99 else "99+")
+                self.badge_public.show()
+            else:
+                self.badge_public.hide()
+
+        # 2. Badge của từng người dùng online
+        if hasattr(self, "sidebar_content_layout"):
+            for i in range(self.sidebar_content_layout.count()):
+                w = self.sidebar_content_layout.itemAt(i).widget()
+                if w:
+                    username = w.property("username")
+                    cnt = self.unread_counts.get(username, 0)
+                    badge = w.findChild(QLabel, "lblUnreadBadge")
+                    if badge:
+                        if cnt > 0 and self.chat_target != username:
+                            badge.setText(str(cnt) if cnt <= 99 else "99+")
+                            badge.show()
+                        else:
+                            badge.hide()
+
+    def render_current_conversation(self):
+        """Vẽ lại toàn bộ tin nhắn thuộc hội thoại hiện tại (Phòng chung hoặc Chat 1-1)"""
+        # Xóa các widget tin nhắn hiện tại khỏi layout
+        while self.chat_content_layout.count():
+            item = self.chat_content_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        messages = self.conversations.get(self.chat_target, [])
+        if not messages:
+            if self.chat_target != "all":
+                # Hiển thị banner hướng dẫn khi cuộc trò chuyện 1-1 chưa có tin nhắn nào
+                banner = QFrame()
+                banner.setObjectName("emptyChatBanner")
+                banner.setStyleSheet("""
+                    QFrame#emptyChatBanner {
+                        background-color: #f8fafc;
+                        border: 1.5px dashed #cbd5e1;
+                        border-radius: 14px;
+                        padding: 16px;
+                        margin: 20px 24px;
+                    }
+                """)
+                b_layout = QVBoxLayout(banner)
+                b_layout.setSpacing(6)
+                b_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+                lbl_lock = QLabel("🔒")
+                lbl_lock.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                lbl_lock.setStyleSheet("font-size: 26px; background: transparent;")
+
+                lbl_t = QLabel(f"Trò chuyện riêng với {self.chat_target}")
+                lbl_t.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                lbl_t.setStyleSheet("font-size: 14px; font-weight: bold; color: #1e293b; background: transparent;")
+
+                lbl_s = QLabel("Tin nhắn gửi tại đây sẽ chỉ gửi riêng cho người này, không gửi vào phòng chung.")
+                lbl_s.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                lbl_s.setStyleSheet("font-size: 12px; color: #64748b; background: transparent;")
+
+                b_layout.addWidget(lbl_lock)
+                b_layout.addWidget(lbl_t)
+                b_layout.addWidget(lbl_s)
+                self.chat_content_layout.addWidget(banner)
+        else:
+            for msg_item in messages:
+                self._render_message_widget(msg_item)
+
+        self.scroll_to_bottom()
+
+    def _render_message_widget(self, msg_dict: dict):
+        """Tạo đối tượng MessageItem và gắn vào chat_content_layout"""
+        sender = msg_dict.get("sender", "")
+        message = msg_dict.get("message", "")
+        is_self = msg_dict.get("is_self", False)
+        msg_id = msg_dict.get("msg_id")
+        avatar_path = msg_dict.get("avatar_path")
+        reply_to = msg_dict.get("reply_to")
+
+        resolved_avatar = None
+        if avatar_path:
+            if os.path.isabs(avatar_path) and os.path.exists(avatar_path):
+                resolved_avatar = avatar_path
+            else:
+                candidate = os.path.join(current_dir, "assets", os.path.basename(avatar_path))
+                if os.path.exists(candidate):
+                    resolved_avatar = candidate
+
+        if MessageItem:
+            widget_item = MessageItem(
+                sender_name=sender,
+                message=message,
+                is_self=is_self,
+                avatar_path=resolved_avatar,
+                reply_to=reply_to
+            )
+            # Xóa stylesheet cục bộ để nhận màu từ style.css
+            if hasattr(widget_item, "lbl_msg"):
+                widget_item.lbl_msg.setStyleSheet("")
+            if hasattr(widget_item, "btn_reply"):
+                widget_item.btn_reply.setStyleSheet("")
+        else:
+            widget_item = QLabel(f"<b>{sender}</b>: {message}")
+            widget_item.setObjectName("fallbackMessage")
+            widget_item.setWordWrap(True)
+
+        self.chat_content_layout.addWidget(widget_item)
+
+        if attach_context_menu_to_message:
+            ctx_msg_dict = {
+                "msg_id": msg_id,
+                "sender": sender,
+                "content": message,
+            }
+            attach_context_menu_to_message(
+                widget=widget_item,
+                message_dict=ctx_msg_dict,
+                get_online_users=self.get_online_usernames,
+                on_reply=self.start_reply,
+                on_forward_confirmed=self.handle_forward_confirmed,
+            )
+        return widget_item
+
+    # =========================================================================
     # NHIỆM VỤ TUẦN 4 (NGUYỄN GIA BẢO): THANH TRẠNG THÁI PHỤ KHI TRẢ LỜI (REPLY)
     # =========================================================================
     def start_reply(self, message_dict: dict):
@@ -692,53 +1094,25 @@ class MainWindow(QMainWindow):
     # =========================================================================
     # CÁC HÀM XỬ LÝ TIN NHẮN (TÍCH HỢP MESSAGEITEM TỪ GUI_WIDGETS.PY)
     # =========================================================================
-    def add_message_to_chat(self, sender: str, message: str, is_self: bool = False, msg_id=None, avatar_path=None, reply_to=None):
-        """Thêm bong bóng tin nhắn Messenger (MessageItem) từ gui_widgets.py vào khung chat (hỗ trợ avatar và reply_to)"""
-        resolved_avatar = None
-        if avatar_path:
-            if os.path.isabs(avatar_path) and os.path.exists(avatar_path):
-                resolved_avatar = avatar_path
-            else:
-                candidate = os.path.join(current_dir, "assets", os.path.basename(avatar_path))
-                if os.path.exists(candidate):
-                    resolved_avatar = candidate
+    def add_message_to_chat(self, sender: str, message: str, is_self: bool = False, msg_id=None, avatar_path=None, reply_to=None, target: str = None):
+        """Thêm bong bóng tin nhắn Messenger (MessageItem) từ gui_widgets.py vào khung chat (hỗ trợ avatar, reply_to và lưu trữ theo hội thoại)"""
+        conv_target = target if target is not None else getattr(self, "chat_target", "all")
 
-        if MessageItem:
-            widget_item = MessageItem(
-                sender_name=sender,
-                message=message,
-                is_self=is_self,
-                avatar_path=resolved_avatar,
-                reply_to=reply_to
-            )
-            # Xóa stylesheet cục bộ để nhận màu từ file style.css
-            if hasattr(widget_item, "lbl_msg"):
-                widget_item.lbl_msg.setStyleSheet("")
-            if hasattr(widget_item, "btn_reply"):
-                widget_item.btn_reply.setStyleSheet("")
-        else:
-            widget_item = QLabel(f"<b>{sender}</b>: {message}")
-            widget_item.setObjectName("fallbackMessage")
-            widget_item.setWordWrap(True)
+        msg_record = {
+            "msg_id": msg_id,
+            "sender": sender,
+            "message": message,
+            "is_self": is_self,
+            "avatar_path": avatar_path,
+            "reply_to": reply_to,
+            "target": conv_target,
+        }
+        self.conversations.setdefault(conv_target, []).append(msg_record)
 
-        self.chat_content_layout.addWidget(widget_item)
-
-        if attach_context_menu_to_message:
-            msg_dict = {
-                "msg_id": msg_id,
-                "sender": sender,
-                "content": message,
-            }
-            attach_context_menu_to_message(
-                widget=widget_item,
-                message_dict=msg_dict,
-                get_online_users=self.get_online_usernames,
-                on_reply=self.start_reply,
-                on_forward_confirmed=self.handle_forward_confirmed,
-            )
-
-        # Tự động cuộn xuống đáy khi có tin nhắn mới (kết hợp multi-stage timer)
-        self.scroll_to_bottom()
+        # Chỉ vẽ trực tiếp ra giao diện nếu người dùng đang đứng ở đúng hội thoại này
+        if conv_target == getattr(self, "chat_target", "all"):
+            self._render_message_widget(msg_record)
+            self.scroll_to_bottom()
 
     def add_system_message(self, text: str):
         """Hiển thị thông báo hệ thống"""
@@ -751,7 +1125,7 @@ class MainWindow(QMainWindow):
         self.scroll_to_bottom()
 
     def send_message(self):
-        """Gửi tin nhắn đi (hỗ trợ cả tin nhắn thường và Reply)"""
+        """Gửi tin nhắn đi (hỗ trợ tin nhắn thường, Reply và định tuyến theo Phòng Chung / Chat Riêng 1-1)"""
         if hasattr(self.txt_message, 'toPlainText'):
             text = self.txt_message.toPlainText().strip()
         else:
@@ -763,14 +1137,16 @@ class MainWindow(QMainWindow):
         my_name = self.txt_username.text().strip() or "Gia Bảo"
         my_avatar = getattr(self, "my_avatar", "default_avatar.png")
         reply_info = self.replying_to
+        target = getattr(self, "chat_target", "all")
 
-        # Hiển thị tin nhắn của chính mình lên khung chat (kèm ô trích dẫn reply nếu có)
+        # Hiển thị tin nhắn của chính mình lên hội thoại hiện tại
         self.add_message_to_chat(
             sender=my_name,
             message=text,
             is_self=True,
             avatar_path=my_avatar,
-            reply_to=reply_info
+            reply_to=reply_info,
+            target=target
         )
 
         # Xóa ô nhập và reset chiều cao nếu là AutoResizingTextEdit
@@ -788,7 +1164,7 @@ class MainWindow(QMainWindow):
                 payload = {
                     "type": "reply",
                     "sender": my_name,
-                    "receiver": "all",
+                    "receiver": target,
                     "content": text,
                     "reply_to": reply_info,
                     "reply_to_id": reply_info.get("msg_id") or 0,
@@ -798,7 +1174,7 @@ class MainWindow(QMainWindow):
                 payload = {
                     "type": "msg",
                     "sender": my_name,
-                    "receiver": "all",
+                    "receiver": target,
                     "content": text,
                 }
             self.network_client.send_data(payload)
@@ -965,6 +1341,7 @@ class MainWindow(QMainWindow):
         msg_id = data.get("msg_id")
         avatar = data.get("avatar")
         reply_to = data.get("reply_to")
+        receiver = data.get("receiver", "all")
 
         if msg_type == "forward":
             orig_sender = data.get("original_sender", "")
@@ -976,14 +1353,28 @@ class MainWindow(QMainWindow):
         
         # Chỉ vẽ nếu tin nhắn không phải từ chính mình gửi lại (tránh bị lặp tin 2 lần)
         if not is_self:
+            # Phân loại: Tin nhắn phòng chung hay tin nhắn riêng 1-1
+            is_private = bool(receiver and str(receiver).strip().lower() != "all")
+            conv_target = sender if is_private else "all"
+
             self.add_message_to_chat(
                 sender=sender,
                 message=content,
                 is_self=False,
                 msg_id=msg_id,
                 avatar_path=avatar,
-                reply_to=reply_to
+                reply_to=reply_to,
+                target=conv_target
             )
+
+            # Nếu tin nhắn đến khi đang ở hội thoại khác -> thông báo và tăng badge chưa đọc
+            if is_private and self.chat_target != conv_target:
+                self.unread_counts[conv_target] = self.unread_counts.get(conv_target, 0) + 1
+                self.update_sidebar_badges()
+                self.add_system_message(f"🔒 Tin nhắn riêng mới từ {sender}: {content[:35]}...")
+            elif not is_private and self.chat_target != "all":
+                self.unread_counts["all"] = self.unread_counts.get("all", 0) + 1
+                self.update_sidebar_badges()
 
     def demo_emoji_click(self):
         """Mở Emoji Picker từ gui_actions.py"""
