@@ -54,6 +54,24 @@ QLabel#lblTopBar {
     background: transparent;
 }
 
+/* Nút Avatar cá nhân trên Top Bar */
+QPushButton#btnMyAvatar {
+    background-color: #ffffff;
+    border: 2px solid #cbd5e1;
+    border-radius: 18px;
+    padding: 0px;
+}
+
+QPushButton#btnMyAvatar:hover {
+    border: 2px solid #27a4fe;
+    background-color: #f0f9ff;
+}
+
+QPushButton#btnMyAvatar:pressed {
+    border: 2px solid #0084ff;
+    background-color: #e0f2fe;
+}
+
 /* Ô nhập liệu: Username, IP, Port */
 QLineEdit#txtUsername,
 QLineEdit#txtIp,

@@ -12,10 +12,10 @@ if project_root not in sys.path:
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QListWidget, QListWidgetItem,
-    QFrame, QMessageBox, QScrollArea
+    QFrame, QMessageBox, QScrollArea, QFileDialog, QMenu, QDialog
 )
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont, QKeySequence, QShortcut
+from PyQt6.QtCore import Qt, QTimer, QSize
+from PyQt6.QtGui import QFont, QKeySequence, QShortcut, QPixmap, QIcon, QPainter, QPainterPath
 
 def load_stylesheet(filename: str = "style.css") -> str:
     """Đọc và nạp nội dung file CSS/QSS riêng biệt từ thư mục Client"""
@@ -46,6 +46,147 @@ except Exception:
     MessageItem = None
     AutoResizingTextEdit = None
     CircularAvatar = None
+
+
+class AvatarChooserDialog(QDialog):
+    """Hộp thoại trực quan để người dùng chọn ảnh đại diện có sẵn hoặc tải từ máy tính"""
+    def __init__(self, current_avatar: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Chọn ảnh đại diện của bạn")
+        self.setFixedSize(380, 260)
+        self.selected_avatar = current_avatar
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(12)
+
+        lbl_title = QLabel("Chọn một ảnh đại diện yêu thích:")
+        lbl_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #1e293b;")
+        lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(lbl_title)
+
+        assets_dir = os.path.join(current_dir, "assets")
+        preset_avatars = [
+            ("avatar_user1.png", "Bé Shin 1"),
+            ("avatar_user2.png", "Bé Shin 2"),
+            ("avatar_user3.png", "Bé Shin 3"),
+            ("avatar_user4.png", "Bé Shin 4"),
+            ("default_avatar.png", "Mặc định"),
+        ]
+
+        grid_layout = QHBoxLayout()
+        grid_layout.setSpacing(10)
+        grid_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        for file_name, label_text in preset_avatars:
+            vbox = QVBoxLayout()
+            vbox.setSpacing(4)
+            vbox.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+            full_path = os.path.join(assets_dir, file_name)
+            btn = QPushButton()
+            btn.setFixedSize(48, 48)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+            pix = QPixmap(full_path) if os.path.exists(full_path) else QPixmap()
+            if not pix.isNull():
+                rounded = QPixmap(48, 48)
+                rounded.fill(Qt.GlobalColor.transparent)
+                painter = QPainter(rounded)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                path = QPainterPath()
+                path.addEllipse(0, 0, 48, 48)
+                painter.setClipPath(path)
+                painter.drawPixmap(0, 0, pix.scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation))
+                painter.end()
+                btn.setIcon(QIcon(rounded))
+                btn.setIconSize(QSize(48, 48))
+
+            is_current = (file_name == os.path.basename(self.selected_avatar))
+            border_color = "#3b82f6" if is_current else "#cbd5e1"
+            bg_color = "#eff6ff" if is_current else "#ffffff"
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {bg_color};
+                    border: 2.5px solid {border_color};
+                    border-radius: 24px;
+                    padding: 0px;
+                }}
+                QPushButton:hover {{
+                    border-color: #2563eb;
+                    background-color: #dbeafe;
+                }}
+            """)
+            btn.clicked.connect(lambda _, fn=file_name: self._on_avatar_selected(fn))
+
+            lbl_name = QLabel(label_text)
+            lbl_name.setStyleSheet("font-size: 11px; color: #64748b;")
+            lbl_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+            vbox.addWidget(btn)
+            vbox.addWidget(lbl_name)
+            grid_layout.addLayout(vbox)
+
+        layout.addLayout(grid_layout)
+
+        # Nút tùy chọn tải ảnh từ máy tính
+        btn_custom = QPushButton("📂 Tải ảnh từ máy tính...")
+        btn_custom.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_custom.setStyleSheet("""
+            QPushButton {
+                background-color: #f8fafc;
+                color: #334155;
+                font-weight: 600;
+                font-size: 12px;
+                border: 1px solid #cbd5e1;
+                border-radius: 8px;
+                padding: 6px 14px;
+            }
+            QPushButton:hover {
+                background-color: #e2e8f0;
+                color: #1e293b;
+                border-color: #94a3b8;
+            }
+        """)
+        btn_custom.clicked.connect(self._choose_custom_file)
+        layout.addWidget(btn_custom)
+
+        # Nút Đóng
+        btn_close = QPushButton("Đóng")
+        btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_close.setStyleSheet("""
+            QPushButton {
+                background-color: #e2e8f0;
+                color: #475569;
+                font-weight: 600;
+                font-size: 12px;
+                border: none;
+                border-radius: 8px;
+                padding: 5px 14px;
+            }
+            QPushButton:hover {
+                background-color: #cbd5e1;
+            }
+        """)
+        btn_close.clicked.connect(self.reject)
+        layout.addWidget(btn_close, alignment=Qt.AlignmentFlag.AlignRight)
+
+    def _on_avatar_selected(self, file_name: str):
+        self.selected_avatar = file_name
+        self.accept()
+
+    def _choose_custom_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Chọn ảnh đại diện của bạn",
+            "",
+            "Hình ảnh (*.png *.jpg *.jpeg *.bmp *.ico);;Tất cả tệp (*.*)"
+        )
+        if file_path:
+            self.selected_avatar = file_path
+            self.accept()
 
 
 class MainWindow(QMainWindow):
@@ -207,6 +348,15 @@ class MainWindow(QMainWindow):
         network_layout.setContentsMargins(14, 10, 14, 10)
         network_layout.setSpacing(10)
 
+        # Nút Avatar cá nhân (Click để đổi avatar)
+        self.avatar_btn = QPushButton()
+        self.avatar_btn.setObjectName("btnMyAvatar")
+        self.avatar_btn.setFixedSize(36, 36)
+        self.avatar_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.avatar_btn.setToolTip("Bấm để đổi ảnh đại diện của bạn")
+        self.avatar_btn.clicked.connect(self.open_avatar_chooser)
+        self.update_my_avatar_button()
+
         # Ô nhập tên tài khoản
         lbl_user = QLabel("User:")
         lbl_user.setObjectName("lblTopBar")
@@ -278,6 +428,7 @@ class MainWindow(QMainWindow):
         self.btn_hide_network.setToolTip("Ẩn thanh thông tin kết nối để mở rộng khung chat")
         self.btn_hide_network.clicked.connect(self.toggle_network_bar)
 
+        network_layout.addWidget(self.avatar_btn)
         network_layout.addWidget(lbl_user)
         network_layout.addWidget(self.txt_username)
         network_layout.addWidget(lbl_ip)
@@ -429,7 +580,8 @@ class MainWindow(QMainWindow):
         self.btn_plus.setObjectName("btnPlus")
         self.btn_plus.setFixedSize(38, 38)
         self.btn_plus.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_plus.setToolTip("Thêm tệp hoặc tính năng")
+        self.btn_plus.setToolTip("Thêm tệp hoặc tính năng (Click để mở menu)")
+        self.btn_plus.clicked.connect(self.show_plus_menu)
 
         # Khung Pill tròn màu trắng chứa ô nhập và các biểu tượng
         self.input_pill = QFrame()
@@ -458,7 +610,8 @@ class MainWindow(QMainWindow):
         self.btn_attach.setObjectName("btnAttach")
         self.btn_attach.setFixedSize(28, 28)
         self.btn_attach.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_attach.setToolTip("Đính kèm tệp")
+        self.btn_attach.setToolTip("Đính kèm tệp hoặc hình ảnh")
+        self.btn_attach.clicked.connect(lambda: self.choose_and_send_file(image_only=False))
 
         self.btn_emoji = QPushButton("😊")
         self.btn_emoji.setObjectName("btnEmoji")
@@ -472,6 +625,7 @@ class MainWindow(QMainWindow):
         self.btn_mic.setFixedSize(28, 28)
         self.btn_mic.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_mic.setToolTip("Ghi âm giọng nói")
+        self.btn_mic.clicked.connect(self.demo_mic_click)
 
         input_pill_layout.addWidget(self.txt_message, stretch=1)
         input_pill_layout.addWidget(self.btn_attach)
@@ -604,19 +758,15 @@ class MainWindow(QMainWindow):
         - Sự kiện click chuột để chuyển sang chat riêng 1-1
         """
         # Đường dẫn ảnh đại diện: ghép với thư mục assets/ nếu là tên file tương đối
-        default_avatar = os.path.join(current_dir, "assets", "default_avatar.png")
-        used_path = default_avatar
-        if avatar_path:
-            if os.path.isabs(avatar_path) and os.path.exists(avatar_path):
-                used_path = avatar_path
-            else:
-                assets_candidate = os.path.join(current_dir, "assets", os.path.basename(avatar_path))
-                if os.path.exists(assets_candidate):
-                    used_path = assets_candidate
+        my_name = self.txt_username.text().strip() if hasattr(self, 'txt_username') else ""
+        if (name == my_name or name == "Nguyễn Gia Bảo") and not avatar_path:
+            avatar_path = getattr(self, "my_avatar", "avatar_user1.png")
+        used_path = self._resolve_avatar_path(avatar_path)
 
         row = QWidget()
         row.setObjectName("userRow")
         row.setProperty("username", name)
+        row.setProperty("is_self", (name == my_name or name == "Nguyễn Gia Bảo"))
         row.setFixedHeight(58)
         row.setCursor(Qt.CursorShape.PointingHandCursor)
         row_layout = QHBoxLayout(row)
@@ -1380,6 +1530,212 @@ class MainWindow(QMainWindow):
         """Mở Emoji Picker từ gui_actions.py"""
         if hasattr(self, 'emoji_dialog') and self.emoji_dialog:
             self.emoji_dialog.show()
+
+    # =========================================================================
+    # QUẢN LÝ AVATAR CÁ NHÂN & GỬI TỆP TIN / HÌNH ẢNH
+    # =========================================================================
+    def _resolve_avatar_path(self, avatar_path: str) -> str:
+        """Tìm đường dẫn tuyệt đối an toàn cho avatar"""
+        default_avatar = os.path.join(current_dir, "assets", "default_avatar.png")
+        if not avatar_path:
+            return default_avatar
+        if os.path.isabs(avatar_path) and os.path.exists(avatar_path):
+            return avatar_path
+        candidate = os.path.join(current_dir, "assets", os.path.basename(avatar_path))
+        if os.path.exists(candidate):
+            return candidate
+        return default_avatar
+
+    def update_my_avatar_button(self):
+        """Cập nhật hình ảnh avatar hiển thị trên nút avatar ở thanh kết nối"""
+        if not hasattr(self, 'avatar_btn') or not self.avatar_btn:
+            return
+        resolved = self._resolve_avatar_path(self.my_avatar)
+        pix = QPixmap(resolved) if os.path.exists(resolved) else QPixmap()
+        if not pix.isNull():
+            rounded = QPixmap(36, 36)
+            rounded.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(rounded)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            path = QPainterPath()
+            path.addEllipse(0, 0, 36, 36)
+            painter.setClipPath(path)
+            painter.drawPixmap(0, 0, pix.scaled(36, 36, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation))
+            painter.end()
+            self.avatar_btn.setIcon(QIcon(rounded))
+            self.avatar_btn.setIconSize(QSize(36, 36))
+            self.avatar_btn.setText("")
+        else:
+            self.avatar_btn.setIcon(QIcon())
+            self.avatar_btn.setText("👤")
+
+    def open_avatar_chooser(self):
+        """Mở hộp thoại chọn hoặc đổi ảnh đại diện cá nhân"""
+        dlg = AvatarChooserDialog(current_avatar=self.my_avatar, parent=self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.my_avatar = dlg.selected_avatar
+            self.update_my_avatar_button()
+            self._update_self_row_avatar()
+            self.add_system_message(f"Đã cập nhật ảnh đại diện: {os.path.basename(self.my_avatar)}")
+
+    def _update_self_row_avatar(self):
+        """Cập nhật lại avatar của dòng chính mình trong sidebar nếu đang hiển thị"""
+        my_name = self.txt_username.text().strip() if hasattr(self, 'txt_username') else ""
+        if not hasattr(self, "sidebar_content_layout"):
+            return
+        resolved = self._resolve_avatar_path(self.my_avatar)
+        for i in range(self.sidebar_content_layout.count()):
+            w = self.sidebar_content_layout.itemAt(i).widget()
+            if w:
+                username = w.property("username") or ""
+                is_self = bool(w.property("is_self")) or (username == my_name) or ("(Bạn)" in username)
+                if not is_self:
+                    for lbl in w.findChildren(QLabel):
+                        if "(Bạn)" in (lbl.text() or ""):
+                            is_self = True
+                            break
+                if is_self:
+                    if CircularAvatar:
+                        avatar_widget = w.findChild(CircularAvatar)
+                        if avatar_widget:
+                            avatar_widget.image_path = resolved
+                            avatar_widget.update_avatar()
+
+    def choose_and_send_file(self, image_only: bool = False):
+        """Mở hộp thoại chọn tệp/hình ảnh từ máy tính và gửi vào cuộc trò chuyện hiện tại"""
+        if image_only:
+            caption = "Chọn hình ảnh để gửi"
+            file_filter = "Hình ảnh (*.png *.jpg *.jpeg *.gif *.bmp);;Tất cả tệp (*.*)"
+        else:
+            caption = "Chọn tệp hoặc hình ảnh để gửi"
+            file_filter = "Tất cả tệp (*.*);;Hình ảnh (*.png *.jpg *.jpeg *.gif *.bmp);;Tài liệu (*.pdf *.docx *.txt *.zip *.rar)"
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            caption,
+            "",
+            file_filter
+        )
+        if not file_path:
+            return
+
+        file_name = os.path.basename(file_path)
+        try:
+            size_bytes = os.path.getsize(file_path)
+            if size_bytes < 1024:
+                size_str = f"{size_bytes} B"
+            elif size_bytes < 1024 * 1024:
+                size_str = f"{size_bytes / 1024:.1f} KB"
+            else:
+                size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
+        except Exception:
+            size_str = "N/A"
+
+        ext = os.path.splitext(file_name)[1].lower()
+        if ext in (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"):
+            prefix = "🖼️ [Hình ảnh]"
+        elif ext in (".pdf", ".doc", ".docx", ".txt", ".xlsx", ".pptx"):
+            prefix = "📄 [Tài liệu]"
+        elif ext in (".zip", ".rar", ".7z", ".tar", ".gz"):
+            prefix = "📦 [Tệp nén]"
+        else:
+            prefix = "📎 [Tệp đính kèm]"
+
+        file_msg = f"{prefix} {file_name} ({size_str})\n📂 Đường dẫn: {file_path}"
+
+        my_name = self.txt_username.text().strip() or "Gia Bảo"
+        my_avatar = getattr(self, "my_avatar", "avatar_user1.png")
+        target = getattr(self, "chat_target", "all")
+        reply_info = self.replying_to
+
+        # Hiển thị lên giao diện chat của chính mình
+        self.add_message_to_chat(
+            sender=my_name,
+            message=file_msg,
+            is_self=True,
+            avatar_path=my_avatar,
+            reply_to=reply_info,
+            target=target
+        )
+
+        if reply_info:
+            self.cancel_reply()
+
+        # Gửi dữ liệu qua NetworkClient nếu đã kết nối
+        if self.network_client and self.network_client.is_running:
+            payload = {
+                "type": "msg",
+                "sender": my_name,
+                "receiver": target,
+                "content": file_msg,
+                "file_info": {
+                    "file_name": file_name,
+                    "file_size": size_str,
+                    "file_path": file_path,
+                }
+            }
+            self.network_client.send_data(payload)
+
+        dest_name = "Phòng Chat Chung" if target == "all" else f"'{target}'"
+        self.add_system_message(f"Đã gửi tệp '{file_name}' ({size_str}) tới {dest_name}.")
+
+    def show_plus_menu(self):
+        """Hiển thị menu tính năng mở rộng khi bấm nút tròn (+)"""
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #ffffff;
+                color: #1e293b;
+                border: 1px solid #cbd5e1;
+                border-radius: 8px;
+                padding: 4px;
+                font-size: 13px;
+            }
+            QMenu::item {
+                padding: 6px 16px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #e0e7ff;
+                color: #1d4ed8;
+            }
+        """)
+
+        act_file = menu.addAction("📎 Đính kèm tệp tin...")
+        act_file.triggered.connect(lambda: self.choose_and_send_file(image_only=False))
+
+        act_img = menu.addAction("🖼️ Gửi hình ảnh...")
+        act_img.triggered.connect(lambda: self.choose_and_send_file(image_only=True))
+
+        menu.addSeparator()
+
+        act_avatar = menu.addAction("🎭 Đổi ảnh đại diện (Avatar)...")
+        act_avatar.triggered.connect(self.open_avatar_chooser)
+
+        act_clear = menu.addAction("🧹 Xóa trắng màn hình chat...")
+        act_clear.triggered.connect(self.clear_current_chat)
+
+        btn_pos = self.btn_plus.mapToGlobal(self.btn_plus.rect().topLeft())
+        menu.exec(btn_pos)
+
+    def clear_current_chat(self):
+        """Xóa trắng màn hình chat hiện tại (làm sạch giao diện)"""
+        target_title = "Phòng Chat Chung" if self.chat_target == "all" else self.chat_target
+        reply = QMessageBox.question(
+            self,
+            "Xác nhận xóa màn hình chat",
+            f"Bạn có chắc muốn làm sạch màn hình trò chuyện của '{target_title}' không?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.conversations[self.chat_target] = []
+            self.render_current_conversation()
+            self.add_system_message("Màn hình trò chuyện đã được làm sạch.")
+
+    def demo_mic_click(self):
+        """Thông báo tính năng ghi âm thoại"""
+        self.add_system_message("🎙️ Tính năng gửi ghi âm thoại (Voice Message) đang được phát triển.")
 
     def closeEvent(self, event):
         """Dọn dẹp kết nối khi đóng ứng dụng"""
