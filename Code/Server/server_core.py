@@ -612,6 +612,10 @@ class ServerCore:
                                     "error": {"code": "USER_OFFLINE", "message": f"Người dùng '{target_user}' hiện không online."}
                                 })
 
+                    elif msg_type == "leave":
+                        self.logger.info(f"Client [{current_username}] chủ động gửi thông điệp rời phòng.")
+                        break
+
                     # Xử lý các loại thông điệp khác (ví dụ: ping, heartbeat...)
                     else:
                         self.logger.info(f"Nhận gói tin loại '{msg_type}' từ [{current_username}]: {message_dict}")
