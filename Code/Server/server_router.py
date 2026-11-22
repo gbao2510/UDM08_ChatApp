@@ -268,7 +268,7 @@ class ServerRouter:
         """Kiểm tra UTF-8 nghiêm ngặt, JSON object, Unicode hợp lệ và gán msg_id."""
         try:
             # "utf-8-sig": tự bỏ BOM nếu có, còn lại vẫn là UTF-8 nghiêm ngặt.
-            text = frame.decode("utf-8-sig")
+            text = frame.decode("utf-8-sig")    
         except UnicodeDecodeError:
             return {
                 "ok": False,
