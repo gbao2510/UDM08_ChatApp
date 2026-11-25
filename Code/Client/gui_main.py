@@ -1165,6 +1165,16 @@ class MainWindow(QMainWindow):
                 widget_item.lbl_msg.setStyleSheet("")
             if hasattr(widget_item, "btn_reply"):
                 widget_item.btn_reply.setStyleSheet("")
+
+            # Kết nối tín hiệu nút Trả lời (Reply button ❞) trên bong bóng chat
+            if hasattr(widget_item, "reply_requested"):
+                widget_item.reply_requested.connect(
+                    lambda data, m_id=msg_id: self.start_reply({
+                        "msg_id": m_id or data.get("msg_id") or 0,
+                        "sender": data.get("sender") or sender,
+                        "content": data.get("content") or message,
+                    })
+                )
         else:
             widget_item = QLabel(f"<b>{sender}</b>: {message}")
             widget_item.setObjectName("fallbackMessage")
