@@ -315,12 +315,7 @@ class MainWindow(QMainWindow):
             self.cancel_reply()
 
         self.set_online_count(0)
-        for i in range(self.sidebar_content_layout.count()):
-            w = self.sidebar_content_layout.itemAt(i).widget()
-            if w:
-                for dot in w.findChildren(QLabel):
-                    if dot.width() == 12 and dot.height() == 12:
-                        dot.setStyleSheet("background-color: #94a3b8; border-radius: 6px; border: 2px solid #ffffff;")
+        self._mark_sidebar_users_offline()
 
         self.add_system_message("Bạn đã rời khỏi phòng chat (Ctrl+Q).")
         self.switch_to_chat_target("all")
@@ -1439,13 +1434,23 @@ class MainWindow(QMainWindow):
 
         # Đổi tất cả người dùng sang trạng thái offline khi mất kết nối
         self.lbl_online.setText("Online Users (Đã ngắt kết nối)")
+        self._mark_sidebar_users_offline()
+
+    def _mark_sidebar_users_offline(self):
+        """Chuyển toàn bộ user đang hiển thị trên sidebar sang trạng thái Offline"""
         for i in range(self.sidebar_content_layout.count()):
             w = self.sidebar_content_layout.itemAt(i).widget()
-            if w:
-                # Tìm chấm trạng thái (dot) và đổi sang màu xám
-                for dot in w.findChildren(QLabel):
-                    if dot.width() == 12 and dot.height() == 12:
-                        dot.setStyleSheet("background-color: #94a3b8; border-radius: 6px; border: 2px solid #ffffff;")
+            if not w:
+                continue
+            for lbl in w.findChildren(QLabel):
+                if lbl.width() == 12 and lbl.height() == 12:
+                    lbl.setObjectName("dotOffline")
+                    lbl.setStyleSheet("background-color: #94a3b8; border-radius: 6px; border: 2px solid #ffffff;")
+                elif lbl.objectName() == "userStatus":
+                    lbl.setText("Offline")
+                    lbl.setObjectName("userStatusOffline")
+                    lbl.style().unpolish(lbl)
+                    lbl.style().polish(lbl)
 
     def on_network_error(self, err_msg):
         """Xử lý khi gặp lỗi mạng"""
