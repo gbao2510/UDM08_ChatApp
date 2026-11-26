@@ -8,12 +8,12 @@
 
 | STT | Họ và Tên | MSSV | Vai trò | Module đảm nhiệm |
 |-----|-----------|------|---------|-----------------|
-| 1 | **Ngô Gia Bảo** | — | Nhóm trưởng | `gui_actions.py` – Emoji Picker, Context Menu, Forward Dialog, Assets helper |
-| 2 | Trần Thuận Trí | — | Thành viên | `server_core.py` – Lõi TCP Server, quản lý kết nối |
-| 3 | Trương Gia Bân | — | Thành viên | `server_router.py` – Bộ định tuyến JSON / UTF-8 |
-| 4 | Lý Huỳnh Bích Trâm | — | Thành viên | `network_worker.py` – QThread Client, gửi/nhận socket |
-| 5 | Nguyễn Gia Bảo | — | Thành viên | `gui_main.py` – Giao diện chính PyQt6 |
-| 6 | Trần Trung Trực | — | Thành viên | `gui_widgets.py` – MessageItem, AutoResizingTextEdit |
+| 1 | **Ngô Gia Bảo** | 054206002006 | Nhóm trưởng | `gui_actions.py` – Emoji Picker, Context Menu, Forward Dialog, Assets helper |
+| 2 | Trần Thuận Trí | 079206028855 | Thành viên | `server_core.py` – Lõi TCP Server, quản lý kết nối |
+| 3 | Trương Gia Bân | 054206001952 | Thành viên | `server_router.py` – Bộ định tuyến JSON / UTF-8 |
+| 4 | Lý Huỳnh Bích Trâm | 079306036968 | Thành viên | `network_worker.py` – QThread Client, gửi/nhận socket |
+| 5 | Nguyễn Gia Bảo | 075206006255 | Thành viên | `gui_main.py` – Giao diện chính PyQt6 |
+| 6 | Trần Trung Trực | 079206029373 | Thành viên | `gui_widgets.py` – MessageItem, AutoResizingTextEdit |
 
 ---
 
