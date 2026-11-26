@@ -1,11 +1,16 @@
 import sys
+import re
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QLabel, QHBoxLayout, 
     QVBoxLayout, QScrollArea, QSpacerItem, QSizePolicy,
     QTextEdit, QPushButton, QFrame
 )
-from PyQt6.QtGui import QPixmap, QPainter, QPainterPath, QColor
-from PyQt6.QtCore import Qt, pyqtSignal, QObject, QEvent, QTimer
+from PyQt6.QtGui import QPixmap, QPainter, QPainterPath, QColor, QTextDocument, QTextOption
+from PyQt6.QtCore import Qt, pyqtSignal, QObject, QEvent, QTimer, QSize
+
+# =========================================================================
+# BẢNG MẪU CSS (QSS) CHUẨN ĐỒNG BỘ CHO TOÀN BỘ WIDGETS
+# =========================================================================
 
 SCROLLBAR_QSS = """
 QScrollBar:vertical {
@@ -39,6 +44,23 @@ QScrollArea#chatScrollArea {
     border-radius: 12px;
 }
 """ + SCROLLBAR_QSS
+
+
+# =========================================================================
+# TIỆN ÍCH XỬ LÝ TỰ ĐỘNG BẺ DÒNG THÔNG MINH CHO TỪ SIÊU DÀI
+# =========================================================================
+
+def wrap_unbroken_words(text: str, max_chunk: int = 25) -> str:
+    """
+    Tự động chèn ký tự ngắt dòng mềm (Zero-Width Space \\u200b) vào các chuỗi 
+    ký tự liền nhau không có khoảng trắng vượt quá max_chunk (như cccccc... hoặc URL dài).
+    Giúp QLabel/bong bóng chat tự động bẻ dòng xuống dòng mới kể cả khi spam ký tự,
+    ngăn chặn triệt để hiện tượng bong bóng bị kéo ngang tràn viền hoặc bị cắt cụt chữ.
+    """
+    if not text:
+        return ""
+    return re.sub(r'(\S{' + str(max_chunk) + r'})', lambda m: m.group(1) + '\u200b', str(text))
+
 
 # =========================================================================
 # COMPONENT 1: AVATAR TRÒN CÓ HIỆU ỨNG HOVER
@@ -91,12 +113,70 @@ class CircularAvatar(QLabel):
 
 
 # =========================================================================
-# COMPONENT 2: BONG BÓNG CHAT (MESSAGEITEM)
+# COMPONENT 2: NHÃN BONG BÓNG CHAT TỰ ĐỘNG XUỐNG DÒNG (CHATBUBBLELABEL)
+# =========================================================================
+
+class ChatBubbleLabel(QLabel):
+    """
+    QLabel chuyên dụng cho bong bóng chat:
+    1. Text ngắn: nằm gọn trên 1 dòng, co theo text, không bị ép xuống 2 dòng vô lý.
+    2. Text dài có khoảng trắng: trải dài tối đa max_width rồi tự động xuống dòng mượt mà.
+    3. Text dài không có khoảng trắng (như ccccc... hoặc link): tự động bẻ dòng xuống nhiều hàng, không tràn, không cắt chữ.
+    """
+    def __init__(self, text="", max_width=380, parent=None):
+        self.raw_text = text
+        self.max_width = max_width
+        formatted = wrap_unbroken_words(text, 25)
+        super().__init__(formatted, parent)
+        self.setWordWrap(True)
+        self.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+
+    def setText(self, text):
+        self.raw_text = text
+        super().setText(wrap_unbroken_words(text, 25))
+
+    def text(self) -> str:
+        return getattr(self, "raw_text", super().text())
+
+    def sizeHint(self) -> QSize:
+        doc = QTextDocument()
+        doc.setDefaultFont(self.font())
+        doc.setDocumentMargin(0)
+        
+        opt = QTextOption()
+        opt.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+        doc.setDefaultTextOption(opt)
+        doc.setPlainText(super().text())
+        
+        doc.setTextWidth(-1)
+        ideal_text_w = doc.idealWidth()
+        
+        # Padding ngang từ stylesheet (padding: 8px 14px -> 28px ngang, 16px dọc)
+        pad_w = 28
+        pad_h = 16
+        max_content_w = self.max_width - pad_w
+        
+        if ideal_text_w <= max_content_w:
+            actual_w = max(16, int(ideal_text_w) + 2)
+            doc.setTextWidth(actual_w)
+            actual_h = int(doc.size().height())
+        else:
+            actual_w = max_content_w
+            doc.setTextWidth(actual_w)
+            actual_h = int(doc.size().height())
+            
+        return QSize(actual_w + pad_w, actual_h + pad_h)
+
+
+# =========================================================================
+# COMPONENT 3: BONG BÓNG CHAT (MESSAGEITEM)
 # =========================================================================
 
 class MessageItem(QWidget):
     """
     Widget đại diện cho 1 bong bóng chat:
+    - Tự động xuống dòng chuẩn xác cho mọi tin nhắn (kể cả chuỗi dài ccccc... hoặc link)
     - Hiệu ứng hover nổi bật trên bong bóng chat
     - Nút Reply xuất hiện mượt mà khi hover vào tin nhắn
     - Hộp trích dẫn (Quote Box) bo góc cao cấp
@@ -139,7 +219,7 @@ class MessageItem(QWidget):
 
         quote_box = QFrame()
         quote_box.setObjectName("quoteBox")
-        quote_box.setMaximumWidth(420)
+        quote_box.setMaximumWidth(380)
         quote_box.setCursor(Qt.CursorShape.PointingHandCursor)
 
         quote_layout = QVBoxLayout(quote_box)
@@ -150,7 +230,8 @@ class MessageItem(QWidget):
         lbl_reply_sender = QLabel(sender_title)
         lbl_reply_sender.setStyleSheet("font-weight: 600; font-size: 11px; color: #0084FF; font-family: 'Segoe UI', sans-serif;")
 
-        lbl_reply_text = QLabel(clean_text)
+        # Áp dụng tự ngắt dòng cho nội dung trích dẫn
+        lbl_reply_text = QLabel(wrap_unbroken_words(clean_text, 25))
         lbl_reply_text.setWordWrap(True)
         lbl_reply_text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         lbl_reply_text.setStyleSheet("color: #65676B; font-size: 12px; font-family: 'Segoe UI', sans-serif;")
@@ -190,10 +271,8 @@ class MessageItem(QWidget):
 
         quote_widget = self.create_quote_widget()
 
-        self.lbl_msg = QLabel(self.message)
-        self.lbl_msg.setWordWrap(True)
-        self.lbl_msg.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.lbl_msg.setMaximumWidth(420)
+        # Dùng ChatBubbleLabel để tự động xuống dòng chuẩn xác
+        self.lbl_msg = ChatBubbleLabel(self.message, max_width=380)
         self.lbl_msg.installEventFilter(self)
 
         # Nút tròn nhỏ ký hiệu ❞ để reply với hiệu ứng hover mượt mà
@@ -331,7 +410,7 @@ class MessageItem(QWidget):
 
 
 # =========================================================================
-# COMPONENT 3: THANH XEM TRƯỚC TRÍCH DẪN (REPLY PREVIEW BAR)
+# COMPONENT 4: THANH XEM TRƯỚC TRÍCH DẪN (REPLY PREVIEW BAR)
 # =========================================================================
 
 class ReplyPreviewBar(QFrame):
@@ -426,7 +505,7 @@ class ReplyPreviewBar(QFrame):
         if len(clean_content) > 75:
             clean_content = clean_content[:72] + "..."
         self.lbl_title.setText(f"↩ Đang trả lời {sender}")
-        self.lbl_content.setText(clean_content)
+        self.lbl_content.setText(wrap_unbroken_words(clean_content, 25))
         self.show()
 
     def clear_reply(self):
@@ -438,7 +517,7 @@ class ReplyPreviewBar(QFrame):
 
 
 # =========================================================================
-# COMPONENT 4: Ô NHẬP TIN NHẮN TỰ CO GIÃN
+# COMPONENT 5: Ô NHẬP TIN NHẮN TỰ CO GIÃN (AUTORESIZINGTEXTEDIT)
 # =========================================================================
 
 class AutoResizingTextEdit(QTextEdit):
@@ -447,6 +526,7 @@ class AutoResizingTextEdit(QTextEdit):
     - Bấm Enter: Gửi tin nhắn.
     - Bấm Shift + Enter: Xuống dòng mới.
     - Tự động mở rộng từ 38px lên tối đa 120px (vượt quá 120px sẽ tự hiện thanh cuộn).
+    - Tự động bẻ dòng kể cả khi gặp chuỗi dài liên tục.
     - Hiệu ứng hover và focus viền xanh Messenger tinh tế.
     """
     send_requested = pyqtSignal()
@@ -461,6 +541,12 @@ class AutoResizingTextEdit(QTextEdit):
         self.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setFixedHeight(self.min_height)
+
+        # Cấu hình bẻ dòng thông minh trong ô nhập
+        opt = QTextOption()
+        opt.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+        self.document().setDefaultTextOption(opt)
+
         self.textChanged.connect(self.adjust_height)
 
         self.setStyleSheet("""
@@ -497,7 +583,7 @@ class AutoResizingTextEdit(QTextEdit):
 
 
 # =========================================================================
-# COMPONENT 5: KHUNG CUỘN CHAT CHUYÊN DỤNG VỚI TỰ ĐỘNG CUỘN ĐÁY
+# COMPONENT 6: KHUNG CUỘN CHAT CHUYÊN DỤNG VỚI TỰ ĐỘNG CUỘN ĐÁY
 # =========================================================================
 
 class ChatScrollArea(QScrollArea):
@@ -536,13 +622,17 @@ class ChatScrollArea(QScrollArea):
         QTimer.singleShot(80, lambda: bar.setValue(bar.maximum()))
 
 
+# =========================================================================
+# SIGNAL BRIDGE
+# =========================================================================
+
 class MessageSignalBridge(QObject):
     """Signal phát dictionary gói tin JSON nhận được từ Server/NetworkClient"""
     message_received = pyqtSignal(dict)
 
 
 # =========================================================================
-# KHỐI TEST CHẠY THỬ ĐỘC LẬP 
+# KHỐI TEST CHẠY THỬ ĐỘC LẬP (PREVIEW GIAO DIỆN)
 # =========================================================================
 
 if __name__ == "__main__":
