@@ -306,11 +306,13 @@ class MainWindow(QMainWindow):
         self.lbl_status.setText("Trạng thái: Đã rời phòng")
         self.lbl_status.setStyleSheet("border: none; color: #fa5252; font-style: italic; font-size: 13px;")
         self.btn_connect.setEnabled(True)
-        if hasattr(self, 'btn_leave'):
-            self.btn_leave.setEnabled(False)
+        self.btn_leave.setEnabled(False)
         self.txt_username.setEnabled(True)
         self.txt_ip.setEnabled(True)
         self.txt_port.setEnabled(True)
+        self.set_chat_input_enabled(False)
+        if getattr(self, "replying_to", None):
+            self.cancel_reply()
 
         self.set_online_count(0)
         for i in range(self.sidebar_content_layout.count()):
@@ -644,6 +646,17 @@ class MainWindow(QMainWindow):
         bottom_layout.addWidget(self.btn_send, alignment=Qt.AlignmentFlag.AlignBottom)
 
         main_layout.addLayout(bottom_layout)
+        self.set_chat_input_enabled(False)
+
+    def set_chat_input_enabled(self, enabled: bool):
+        """Bật/tắt khu vực nhập và gửi tin nhắn theo trạng thái kết nối"""
+        for attr in ("txt_message", "btn_send", "btn_attach", "btn_emoji", "btn_mic"):
+            widget = getattr(self, attr, None)
+            if widget is not None:
+                widget.setEnabled(enabled)
+        if hasattr(self, "txt_message") and self.txt_message is not None:
+            placeholder = "Nhập tin nhắn..." if enabled else "Vui lòng kết nối Server để nhắn tin..."
+            self.txt_message.setPlaceholderText(placeholder)
 
     def _create_public_room_row(self) -> QFrame:
         """Tạo thẻ bấm chuyển nhanh về Phòng Chat Chung trên đầu sidebar"""
@@ -1286,6 +1299,10 @@ class MainWindow(QMainWindow):
 
     def send_message(self):
         """Gửi tin nhắn đi (hỗ trợ tin nhắn thường, Reply và định tuyến theo Phòng Chung / Chat Riêng 1-1)"""
+        if not (self.network_client and self.network_client.is_running):
+            self.add_system_message("Bạn đã rời phòng hoặc chưa kết nối Server. Vui lòng kết nối lại để gửi tin nhắn.")
+            return
+
         if hasattr(self.txt_message, 'toPlainText'):
             text = self.txt_message.toPlainText().strip()
         else:
@@ -1299,7 +1316,29 @@ class MainWindow(QMainWindow):
         reply_info = self.replying_to
         target = getattr(self, "chat_target", "all")
 
-        # Hiển thị tin nhắn của chính mình lên hội thoại hiện tại
+        if reply_info:
+            payload = {
+                "type": "reply",
+                "sender": my_name,
+                "receiver": target,
+                "content": text,
+                "reply_to": reply_info,
+                "reply_to_id": reply_info.get("msg_id") or 0,
+                "reply_to_msg_id": reply_info.get("msg_id") or 0,
+            }
+        else:
+            payload = {
+                "type": "msg",
+                "sender": my_name,
+                "receiver": target,
+                "content": text,
+            }
+
+        if not self.network_client.send_data(payload):
+            self.add_system_message("Gửi tin nhắn thất bại do mất kết nối tới Server.")
+            return
+
+        # Hiển thị tin nhắn của chính mình lên hội thoại hiện tại sau khi gửi thành công
         self.add_message_to_chat(
             sender=my_name,
             message=text,
@@ -1317,27 +1356,6 @@ class MainWindow(QMainWindow):
         # Hủy thanh trạng thái Reply sau khi gửi
         if reply_info:
             self.cancel_reply()
-
-        # Gửi dữ liệu qua NetworkClient nếu đã kết nối Server
-        if self.network_client and self.network_client.is_running:
-            if reply_info:
-                payload = {
-                    "type": "reply",
-                    "sender": my_name,
-                    "receiver": target,
-                    "content": text,
-                    "reply_to": reply_info,
-                    "reply_to_id": reply_info.get("msg_id") or 0,
-                    "reply_to_msg_id": reply_info.get("msg_id") or 0,
-                }
-            else:
-                payload = {
-                    "type": "msg",
-                    "sender": my_name,
-                    "receiver": target,
-                    "content": text,
-                }
-            self.network_client.send_data(payload)
 
     # =========================================================================
     # KẾT NỐI VÀ XỬ LÝ SIGNAL TỪ NETWORK_WORKER.PY
@@ -1392,6 +1410,7 @@ class MainWindow(QMainWindow):
         self.txt_username.setEnabled(False)
         self.txt_ip.setEnabled(False)
         self.txt_port.setEnabled(False)
+        self.set_chat_input_enabled(True)
         self.update_collapsed_network_text()
 
         # Gửi thông điệp login kèm username và avatar để Server đồng bộ danh sách online (Tuần 2 & 3)
@@ -1409,11 +1428,13 @@ class MainWindow(QMainWindow):
         self.lbl_status.setText("Trạng thái: Đã ngắt kết nối")
         self.lbl_status.setStyleSheet("border: none; color: #b0b3b8; font-style: italic; font-size: 13px;")
         self.btn_connect.setEnabled(True)
-        if hasattr(self, 'btn_leave'):
-            self.btn_leave.setEnabled(False)
+        self.btn_leave.setEnabled(False)
         self.txt_username.setEnabled(True)
         self.txt_ip.setEnabled(True)
         self.txt_port.setEnabled(True)
+        self.set_chat_input_enabled(False)
+        if getattr(self, "replying_to", None):
+            self.cancel_reply()
         self.update_collapsed_network_text()
 
         # Đổi tất cả người dùng sang trạng thái offline khi mất kết nối
@@ -1431,11 +1452,13 @@ class MainWindow(QMainWindow):
         self.lbl_status.setText("Trạng thái: Lỗi kết nối")
         self.lbl_status.setStyleSheet("border: none; color: #fa5252; font-style: italic; font-size: 13px;")
         self.btn_connect.setEnabled(True)
-        if hasattr(self, 'btn_leave'):
-            self.btn_leave.setEnabled(False)
+        self.btn_leave.setEnabled(False)
         self.txt_username.setEnabled(True)
         self.txt_ip.setEnabled(True)
         self.txt_port.setEnabled(True)
+        self.set_chat_input_enabled(False)
+        if getattr(self, "replying_to", None):
+            self.cancel_reply()
         QMessageBox.warning(self, "Lỗi mạng", err_msg)
 
     def on_message_received(self, data):
@@ -1613,6 +1636,10 @@ class MainWindow(QMainWindow):
 
     def choose_and_send_file(self, image_only: bool = False):
         """Mở hộp thoại chọn tệp/hình ảnh từ máy tính và gửi vào cuộc trò chuyện hiện tại"""
+        if not (self.network_client and self.network_client.is_running):
+            self.add_system_message("Bạn đã rời phòng hoặc chưa kết nối Server. Vui lòng kết nối lại để gửi tệp.")
+            return
+
         if image_only:
             caption = "Chọn hình ảnh để gửi"
             file_filter = "Hình ảnh (*.png *.jpg *.jpeg *.gif *.bmp);;Tất cả tệp (*.*)"
@@ -1658,6 +1685,22 @@ class MainWindow(QMainWindow):
         target = getattr(self, "chat_target", "all")
         reply_info = self.replying_to
 
+        # Gửi dữ liệu qua NetworkClient trước khi hiển thị lên giao diện
+        payload = {
+            "type": "msg",
+            "sender": my_name,
+            "receiver": target,
+            "content": file_msg,
+            "file_info": {
+                "file_name": file_name,
+                "file_size": size_str,
+                "file_path": file_path,
+            }
+        }
+        if not self.network_client.send_data(payload):
+            self.add_system_message("Gửi tệp thất bại do mất kết nối tới Server.")
+            return
+
         # Hiển thị lên giao diện chat của chính mình
         self.add_message_to_chat(
             sender=my_name,
@@ -1670,21 +1713,6 @@ class MainWindow(QMainWindow):
 
         if reply_info:
             self.cancel_reply()
-
-        # Gửi dữ liệu qua NetworkClient nếu đã kết nối
-        if self.network_client and self.network_client.is_running:
-            payload = {
-                "type": "msg",
-                "sender": my_name,
-                "receiver": target,
-                "content": file_msg,
-                "file_info": {
-                    "file_name": file_name,
-                    "file_size": size_str,
-                    "file_path": file_path,
-                }
-            }
-            self.network_client.send_data(payload)
 
         dest_name = "Phòng Chat Chung" if target == "all" else f"'{target}'"
         self.add_system_message(f"Đã gửi tệp '{file_name}' ({size_str}) tới {dest_name}.")
